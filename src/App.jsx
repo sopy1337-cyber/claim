@@ -12,7 +12,8 @@ import {
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, addDoc, updateDoc, deleteDoc, 
-  doc, onSnapshot, query, where, getDoc, setDoc
+  doc, onSnapshot, query, where, getDoc, setDoc,
+  collectionGroup, getDocs
 } from 'firebase/firestore';
 import { 
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
@@ -93,12 +94,12 @@ const App = () => {
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [signUpData, setSignUpData] = useState({
     email: '', password: '', passwordConfirm: '',
-    name: '', phone: '', company: '', position: '', address: '', licenseNo: ''
+    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: ''
   });
 
   // 구글 로그인 후 최초 1회 추가 정보 입력 상태
   const [setupData, setSetupData] = useState({
-    phone: '', company: '', position: '', address: '', licenseNo: ''
+    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: ''
   });
 
   const [isAddrOpen, setIsAddrOpen] = useState(false);
@@ -107,6 +108,8 @@ const App = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
   
+  const [pendingUsers, setPendingUsers] = useState([]);
+
   // 할 일(To-Do) 상태
   const [todos, setTodos] = useState([]);
   const [todoInput, setTodoInput] = useState('');
@@ -242,6 +245,7 @@ const App = () => {
             setAuthMode('pending');
           }
         } else {
+          setSetupData(prev => ({ ...prev, name: currentUser.displayName || '' }));
           setAuthMode('setup'); // 인증은 됐으나 프로필 정보가 없는 경우
         }
         setUser(currentUser);
@@ -281,12 +285,14 @@ const App = () => {
         company: signUpData.company,
         position: signUpData.position,
         address: signUpData.address,
+        detailAddress: signUpData.detailAddress,
         licenseNo: signUpData.licenseNo,
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
       await setDoc(doc(db, 'artifacts', appId, 'users', userCred.user.uid, 'profile', 'info'), profileInfo);
       setProfile(profileInfo);
+      setAuthMode('pending');
     } catch (err) { setErrorMsg("가입 실패: " + err.message); }
     finally { setLoading(false); }
   };
@@ -323,6 +329,40 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
+  // --- 관리자 전용: 승인 대기자 조회 및 승인 핸들러 ---
+  const fetchPendingUsers = async () => {
+    try {
+      // 모든 사용자의 'profile' 서브컬렉션에서 승인되지 않은 문서 검색
+      // ※ 주의: Firebase 콘솔에서 'profile' 컬렉션 그룹에 대한 색인(Index) 생성이 필요할 수 있습니다.
+      const q = query(collectionGroup(db, 'profile'), where('approved', '==', false));
+      const querySnapshot = await getDocs(q);
+      const users = querySnapshot.docs.map(doc => ({ 
+        uid: doc.ref.parent.parent.id, 
+        ...doc.data() 
+      }));
+      setPendingUsers(users);
+    } catch (err) {
+      console.error("대기자 명단 로드 실패:", err);
+    }
+  };
+
+  const handleApproveUser = async (userId) => {
+    try {
+      const userRef = doc(db, 'artifacts', appId, 'users', userId, 'profile', 'info');
+      await updateDoc(userRef, { approved: true });
+      alert("사용자가 승인되었습니다.");
+      fetchPendingUsers(); // 목록 갱신
+    } catch (err) {
+      alert("승인 처리 중 오류가 발생했습니다: " + err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'admin' && profile?.email === 'sopy1337@gmail.com') {
+      fetchPendingUsers();
+    }
+  }, [view, profile]);
+
   // --- 구글 로그인 핸들러 ---
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -350,11 +390,12 @@ const App = () => {
       const profileInfo = {
         uid: user.uid,
         email: user.email,
-        name: user.displayName || '',
+        name: setupData.name,
         phone: setupData.phone,
         company: setupData.company,
         position: setupData.position,
         address: setupData.address,
+        detailAddress: setupData.detailAddress,
         licenseNo: setupData.licenseNo,
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
@@ -747,7 +788,7 @@ const App = () => {
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white font-black animate-pulse">SYSTEM LOADING...</div>;
 
   // --- 인증 화면 (회원가입/로그인/비밀번호찾기) ---
-  if (!user) {
+  if (authMode !== 'app') {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans overflow-y-auto">
         {isAddrOpen && (
@@ -762,7 +803,7 @@ const App = () => {
           </div>
         )}
 
-        <div className={`bg-white w-full ${authMode === 'signup' ? 'max-w-2xl' : 'max-w-md'} p-10 rounded-[3rem] shadow-2xl relative overflow-hidden transition-all duration-500 my-10`}>
+        <div className={`bg-white w-full ${authMode === 'signup' || authMode === 'setup' ? 'max-w-2xl' : 'max-w-md'} p-10 rounded-[3rem] shadow-2xl relative overflow-hidden transition-all duration-500 my-10`}>
           <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600"></div>
           <div className="flex flex-col items-center mb-10 text-center">
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-indigo-400 mb-4 shadow-xl"><ShieldCheck size={32}/></div>
@@ -775,7 +816,7 @@ const App = () => {
                 onClick={handleGoogleLogin} 
                 className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-black text-sm shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3"
               >
-                <img src="https://www.gstatic.com/firebase/herojs/2/google.svg" className="w-5 h-5" alt="Google" />
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
                 Google 계정으로 로그인
               </button>
               
@@ -809,7 +850,7 @@ const App = () => {
           {authMode === 'signup' && (
             <form onSubmit={handleSignUp} className="space-y-5 animate-in slide-in-from-bottom-4">
               <div className="grid grid-cols-2 gap-4">
-                <input type="text" placeholder="성명" value={signUpData.name} onChange={e=>setSignUpData({...signUpData, name: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="text" placeholder="성명" value={signUpData.name} onChange={e=>setSignUpData({...signUpData, name: e.target.value})} required autoComplete="off" className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <input type="text" placeholder="연락처" value={signUpData.phone} onChange={e=>setSignUpData({...signUpData, phone: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -820,6 +861,7 @@ const App = () => {
                 <input type="text" placeholder="사무소 주소" value={signUpData.address} readOnly required className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <button type="button" onClick={() => handleOpenAddr(addr => setSignUpData({...signUpData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2"><MapIcon size={14}/> 주소 검색</button>
               </div>
+              <input type="text" placeholder="상세 주소" value={signUpData.detailAddress} onChange={e=>setSignUpData({...signUpData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e=>setSignUpData({...signUpData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               
               <div className="border-t pt-5 space-y-4">
@@ -835,72 +877,75 @@ const App = () => {
             </form>
           )}
 
-{authMode === 'forgot' && (
-  <form onSubmit={handleResetPassword} className="space-y-6 animate-in fade-in duration-500">
-    <div className="text-center">
-      <p className="text-sm font-bold text-slate-600">등록된 이메일로 비밀번호 재설정 링크를 보냅니다.</p>
-    </div>
-    <input 
-      type="email" 
-      placeholder="가입한 이메일 주소" 
-      value={loginData.email} 
-      onChange={e => setLoginData({...loginData, email: e.target.value})} 
-      required 
-      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-indigo-500 transition-colors" 
-    />
-    {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
-    {successMsg && <p className="text-emerald-500 text-xs font-black px-2">{successMsg}</p>}
-    
-    <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-xl active:scale-[0.98] transition-transform">
-      메일 발송
-    </button>
-    <button type="button" onClick={() => setAuthMode('login')} className="w-full text-slate-400 text-xs font-bold text-center underline">
-      로그인으로 돌아가기
-    </button>
-  </form> // </div>에서 </form>으로 수정
-)}
+          {authMode === 'forgot' && (
+            <form onSubmit={handleResetPassword} className="space-y-6 animate-in fade-in duration-500">
+              <div className="text-center">
+                <p className="text-sm font-bold text-slate-600">등록된 이메일로 비밀번호 재설정 링크를 보냈습니다.</p>
+              </div>
+              <input 
+                type="email" 
+                placeholder="가입한 이메일 주소" 
+                value={loginData.email} 
+                onChange={e => setLoginData({...loginData, email: e.target.value})} 
+                required 
+                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-indigo-500 transition-colors" 
+              />
+              {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+              {successMsg && <p className="text-emerald-500 text-xs font-black px-2">{successMsg}</p>}
+              
+              <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-xl active:scale-[0.98] transition-transform">
+                메일 발송
+              </button>
+              <button type="button" onClick={() => setAuthMode('login')} className="w-full text-slate-400 text-xs font-bold text-center underline">
+                로그인으로 돌아가기
+              </button>
+            </form>
+          )}
 
-{authMode === 'setup' && (
-  <form onSubmit={handleCompleteSetup} className="space-y-5 animate-in slide-in-from-bottom-4 duration-500">
-    <div className="text-center mb-4">
-      <p className="text-sm font-bold text-slate-600">
-        환영합니다, <span className="text-indigo-600">{user?.displayName}</span>님!<br/>
-        원활한 서비스 이용을 위해 추가 정보를 입력해주세요.
-      </p>
-    </div>
-    
-    <div className="grid grid-cols-2 gap-4">
-      <input type="tel" placeholder="연락처 (- 제외)" value={setupData.phone} onChange={e => setSetupData({...setupData, phone: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-      <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({...setupData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-    </div>
+          {authMode === 'setup' && (
+            <form onSubmit={handleCompleteSetup} className="space-y-5 animate-in slide-in-from-bottom-4 duration-500">
+              <div className="text-center mb-4">
+                <p className="text-sm font-bold text-slate-600">
+                  환영합니다, <span className="text-indigo-600">{user?.displayName}</span>님!<br/>
+                  원활한 서비스 이용을 위해 추가 정보를 입력해주세요.
+                </p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <input type="text" placeholder="성명" value={setupData.name} onChange={e => setSetupData({...setupData, name: e.target.value})} required autoComplete="off" className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="tel" placeholder="연락처 (- 제외)" value={setupData.phone} onChange={e => setSetupData({...setupData, phone: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="text" placeholder="업체명" value={setupData.company} onChange={e => setSetupData({...setupData, company: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="text" placeholder="직책" value={setupData.position} onChange={e => setSetupData({...setupData, position: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+              </div>
 
-    {/* ... 나머지 필드 동일 ... */}
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="사무소 주소" 
+                  value={setupData.address} 
+                  readOnly 
+                  onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} 
+                  className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" 
+                />
+                <button type="button" onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
+                  <MapIcon size={14}/> 주소 검색
+                </button>
+              </div>
 
-    <div className="flex gap-2">
-      <input 
-        type="text" 
-        placeholder="사무소 주소" 
-        value={setupData.address} 
-        readOnly 
-        onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} // 클릭 시에도 검색창 오픈
-        className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" 
-      />
-      <button type="button" onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
-        <MapIcon size={14}/> 주소 검색
-      </button>
-    </div>
-    
-    {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
-    
-    <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-[0.98]">
-      가입 완료 및 시스템 접속
-    </button>
-    
-    <button type="button" onClick={() => signOut(auth)} className="w-full text-slate-400 text-xs font-bold text-center underline">
-      다른 계정으로 로그인
-    </button>
-  </form>
-)}
+              <input type="text" placeholder="상세 주소" value={setupData.detailAddress} onChange={e => setSetupData({...setupData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+              <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({...setupData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+              
+              {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+              
+              <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-[0.98]">
+                가입 완료 및 승인 요청
+              </button>
+              
+              <button type="button" onClick={() => signOut(auth)} className="w-full text-slate-400 text-xs font-bold text-center underline">
+                다른 계정으로 로그인
+              </button>
+            </form>
+          )}
 
           {authMode === 'pending' && (
             <div className="space-y-8 animate-in zoom-in text-center py-10">
@@ -931,6 +976,12 @@ const App = () => {
             <button onClick={()=>setView('list')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='list'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileText size={20}/> 사건 관리대장</button>
             <button onClick={handleNewReport} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='report'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileEdit size={20}/> 손해사정서 작성</button>
             
+            {profile?.email === 'sopy1337@gmail.com' && (
+              <button onClick={()=>setView('admin')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='admin'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}>
+                <Shield size={20}/> 관리자 승인
+              </button>
+            )}
+
             <div className="pt-4 mt-4 border-t border-slate-800 space-y-1">
               <p className="px-5 text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Data Management</p>
               <button onClick={handleExportCSV} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 transition-all font-bold text-xs"><FileSearch size={18}/> 엑셀(CSV) 내보내기</button>
@@ -956,7 +1007,7 @@ const App = () => {
           <div className="flex items-center gap-6">
             {view === 'report' && <button onClick={()=>setView('list')} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><ChevronLeft size={24}/></button>}
             <h2 className="text-2xl font-black text-slate-800 tracking-tight italic uppercase underline decoration-indigo-500 decoration-4 underline-offset-8 tracking-tighter">
-              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : '현황판'}
+              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : view === 'admin' ? '신규 가입자 승인' : '현황판'}
             </h2>
           </div>
           <div className="flex gap-4">
@@ -1101,6 +1152,51 @@ const App = () => {
                   </div>
                   <button onClick={()=>setView('list')} className="px-10 py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl transition-all hover:scale-105">전체 사건 조회</button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ADMIN VIEW: 가입 승인 관리 */}
+          {view === 'admin' && (
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
+              <div className="p-8 bg-slate-50/30 border-b flex justify-between items-center">
+                <h3 className="text-lg font-black text-slate-800">승인 대기 중인 사용자 ({pendingUsers.length})</h3>
+                <button onClick={fetchPendingUsers} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-black hover:bg-indigo-100 transition-all">새로고침</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50/50 text-[10px] text-slate-400 font-black uppercase tracking-widest border-b">
+                    <tr>
+                      <th className="px-10 py-6">성명 / 이메일</th>
+                      <th className="px-8 py-6">업체 / 직책</th>
+                      <th className="px-6 py-6">연락처 / 자격번호</th>
+                      <th className="px-10 py-6 text-right">작업</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {pendingUsers.length > 0 ? pendingUsers.map(u => (
+                      <tr key={u.uid} className="hover:bg-indigo-50/10 transition-all">
+                        <td className="px-10 py-8">
+                          <p className="font-black text-sm text-slate-800">{u.name}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">{u.email}</p>
+                        </td>
+                        <td className="px-8 py-8">
+                          <p className="text-sm font-bold text-slate-700">{u.company}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">{u.position}</p>
+                        </td>
+                        <td className="px-6 py-8">
+                          <p className="text-sm font-bold text-slate-700">{u.phone}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">No. {u.licenseNo}</p>
+                        </td>
+                        <td className="px-10 py-8 text-right">
+                          <button onClick={() => handleApproveUser(u.uid)} className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg hover:bg-indigo-700 transition-all">승인하기</button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="4" className="px-10 py-20 text-center text-slate-300 font-bold uppercase tracking-widest">승인 대기 중인 사용자가 없습니다.</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
