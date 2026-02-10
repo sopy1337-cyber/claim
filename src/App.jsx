@@ -17,7 +17,7 @@ import {
 import { 
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
   signOut, onAuthStateChanged, signInWithCustomToken,
-  sendPasswordResetEmail
+  sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup
 } from 'firebase/auth';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -51,14 +51,6 @@ const unformatComma = (val) => {
   return Number(num) || 0;
 };
 
-const formatPhone = (val) => {
-  if (!val) return "";
-  const num = val.replace(/[^0-9]/g, "");
-  if (num.length <= 3) return num;
-  if (num.length <= 7) return `${num.slice(0, 3)}-${num.slice(3)}`;
-  return `${num.slice(0, 3)}-${num.slice(3, 7)}-${num.slice(7, 11)}`;
-};
-
 // --- 리포트용 헬퍼 컴포넌트 ---
 const InputGroup = ({ label, children }) => (
   <div className="space-y-1">
@@ -86,13 +78,27 @@ const App = () => {
   const [authMode, setAuthMode] = useState('login'); 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [googleToken, setGoogleToken] = useState(null);
   const [isSavingReport, setIsSavingReport] = useState(false);
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
 
-  // 폼 상태
+  const [quickEvent, setQuickEvent] = useState({
+    scheduleTitle: '',
+    scheduleDate: new Date().toISOString().split('T')[0],
+    scheduleTime: new Date().toTimeString().slice(0, 5),
+    scheduleDesc: ''
+  });
+
+  const [isQuickModalOpen, setIsQuickModalOpen] = useState(false);
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [signUpData, setSignUpData] = useState({
     email: '', password: '', passwordConfirm: '',
     name: '', phone: '', company: '', position: '', address: '', licenseNo: ''
+  });
+
+  // 구글 로그인 후 최초 1회 추가 정보 입력 상태
+  const [setupData, setSetupData] = useState({
+    phone: '', company: '', position: '', address: '', licenseNo: ''
   });
 
   const [isAddrOpen, setIsAddrOpen] = useState(false);
@@ -101,14 +107,15 @@ const App = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
   
+  // 할 일(To-Do) 상태
+  const [todos, setTodos] = useState([]);
+  const [todoInput, setTodoInput] = useState('');
+  const [selectedTodoDate, setSelectedTodoDate] = useState(new Date().toISOString().split('T')[0]);
+
   // 사건 수정용 상세 상태 (이미지 기반 복구)
   const [editingCase, setEditingCase] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [diagInput, setDiagInput] = useState('');
-
-  // 메모(To-Do) 상태
-  const [memos, setMemos] = useState([]);
-  const [memoInput, setMemoInput] = useState('');
 
   // 손해사정서 작성 상태
   const [selectedCaseForReport, setSelectedCaseForReport] = useState(null);
@@ -222,12 +229,24 @@ const App = () => {
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
-        const profileDoc = await getDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'info'));
-        if (profileDoc.exists()) setProfile(profileDoc.data());
-        setAuthMode('app');
+        setLoading(true);
+        const profileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'info');
+        const profileDoc = await getDoc(profileRef);
+        if (profileDoc.exists()) {
+          const data = profileDoc.data();
+          setProfile(data);
+          if (data.approved) {
+            setAuthMode('app');
+          } else {
+            setAuthMode('pending');
+          }
+        } else {
+          setAuthMode('setup'); // 인증은 됐으나 프로필 정보가 없는 경우
+        }
+        setUser(currentUser);
       } else {
+        setUser(null);
         setAuthMode('login');
       }
       setLoading(false);
@@ -235,54 +254,7 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // --- 데이터 로드 ---
-  useEffect(() => {
-    if (!user) return;
-    const userCasesCollection = collection(db, 'artifacts', appId, 'users', user.uid, 'cases');
-    const unsubscribe = onSnapshot(userCasesCollection, (snapshot) => {
-      setCases(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, [user]);
-
-  // --- 메모 데이터 로드 및 관리 ---
-  useEffect(() => {
-    if (!user) return;
-    const memosCol = collection(db, 'artifacts', appId, 'users', user.uid, 'memos');
-    const unsubscribe = onSnapshot(memosCol, (snapshot) => {
-      setMemos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.createdAt?.localeCompare(a.createdAt)));
-    });
-    return () => unsubscribe();
-  }, [user]);
-
-  const handleAddMemo = async () => {
-    if (!memoInput.trim() || !user) return;
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'memos'), {
-        text: memoInput,
-        completed: false,
-        createdAt: new Date().toISOString()
-      });
-      setMemoInput('');
-    } catch (e) { console.error(e); }
-  };
-
-  const toggleMemo = async (memo) => {
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'memos', memo.id), {
-        completed: !memo.completed
-      });
-    } catch (e) { console.error(e); }
-  };
-
-  const deleteMemo = async (id) => {
-    if (!window.confirm("삭제하시겠습니까?")) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'memos', id));
-    } catch (e) { console.error(e); }
-  };
-
-  // --- 인증 핸들러 ---
+  // --- 일반 인증 핸들러 ---
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -310,6 +282,7 @@ const App = () => {
         position: signUpData.position,
         address: signUpData.address,
         licenseNo: signUpData.licenseNo,
+        approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
       await setDoc(doc(db, 'artifacts', appId, 'users', userCred.user.uid, 'profile', 'info'), profileInfo);
@@ -329,13 +302,139 @@ const App = () => {
     finally { setLoading(false); }
   };
 
-  const handleDelete = async (id) => {
-    if (!user || !window.confirm("정말 삭제하시겠습니까?")) return;
+  // --- 데이터 로드 ---
+  useEffect(() => {
+    if (!user) return;
+    const userCasesCollection = collection(db, 'artifacts', appId, 'users', user.uid, 'cases');
+    const unsubscribe = onSnapshot(userCasesCollection, (snapshot) => {
+      setCases(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- 할 일 데이터 로드 ---
+  useEffect(() => {
+    if (!user) return;
+    const todosCollection = collection(db, 'artifacts', appId, 'users', user.uid, 'todos');
+    const q = query(todosCollection);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setTodos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- 구글 로그인 핸들러 ---
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    // 로그인 시점에 캘린더 권한도 함께 요청하여 세션 전환 방지
+    provider.addScope('https://www.googleapis.com/auth/calendar.events');
+    
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', id));
-    } catch (err) {
-      console.error("Error deleting case:", err);
-      alert("삭제 중 오류가 발생했습니다.");
+      setLoading(true);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential) setGoogleToken(credential.accessToken);
+    } catch (err) { 
+      console.error(err);
+      setErrorMsg("구글 로그인에 실패했습니다. 팝업 차단 여부를 확인하세요."); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  const handleCompleteSetup = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    try {
+      setLoading(true);
+      const profileInfo = {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || '',
+        phone: setupData.phone,
+        company: setupData.company,
+        position: setupData.position,
+        address: setupData.address,
+        licenseNo: setupData.licenseNo,
+        approved: false, // 승인 대기 상태로 시작
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info'), profileInfo);
+      setProfile(profileInfo);
+      setAuthMode('pending');
+    } catch (err) { 
+      setErrorMsg("프로필 저장 실패: " + err.message); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  // --- 구글 API 연동 핸들러 ---
+  const handleConnectGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/calendar.events');
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      setGoogleToken(credential.accessToken);
+      alert("구글 캘린더 API 연동이 완료되었습니다.");
+    } catch (error) {
+      console.error("Google 연동 실패:", error.code, error.message);
+      if (error.code === 'auth/popup-blocked') {
+        alert("브라우저의 팝업 차단 기능이 활성화되어 있습니다. 주소창 옆의 아이콘을 클릭하여 팝업을 허용해 주세요.");
+      } else if (error.code === 'auth/operation-not-allowed') {
+        alert("Firebase 콘솔에서 Google 로그인이 활성화되어 있지 않습니다.");
+      } else {
+        alert(`연동에 실패했습니다: ${error.message}\nFirebase 콘솔의 '승인된 도메인' 설정에 현재 주소가 등록되어 있는지 확인하세요.`);
+      }
+    }
+  };
+
+  const saveToGoogleCalendarAPI = async (eventData) => {
+    if (!googleToken) {
+      alert("먼저 대시보드에서 '구글 API 연동'을 완료해주세요.");
+      return;
+    }
+
+    const { scheduleDate, scheduleTime, scheduleTitle, scheduleDesc, address } = eventData;
+    const start = new Date(`${scheduleDate}T${scheduleTime}`);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+    const event = {
+      summary: scheduleTitle || '의뢰인 미팅',
+      location: address || '',
+      description: scheduleDesc || '',
+      start: { dateTime: start.toISOString() },
+      end: { dateTime: end.toISOString() },
+    };
+
+    try {
+      const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(event)
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert("일정이 캘린더에 즉시 저장되었습니다.");
+        setCalendarRefreshKey(prev => prev + 1); // 달력 iframe 새로고침 트리거
+      } else {
+        console.error("Google API 상세 에러:", result);
+        throw new Error(result.error?.message || "API 호출 실패");
+      }
+    } catch (error) {
+      console.error("일정 저장 실패:", error);
+      if (error.message.includes("API has not been used") || error.message.includes("disabled")) {
+        alert("구글 캘린더 API가 활성화되지 않았습니다.\n\n1. 에러 메시지의 링크를 클릭해 '사용 설정'을 해주세요.\n2. 설정 후 반영까지 3~5분 정도 소요됩니다.");
+        window.open(`https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=${firebaseConfig.messagingSenderId}`, '_blank');
+      } else {
+        alert(`일정 저장 중 오류가 발생했습니다: ${error.message}`);
+      }
     }
   };
 
@@ -348,22 +447,15 @@ const App = () => {
     if (dataToSave.insurances && dataToSave.insurances.length > 0) {
         const first = dataToSave.insurances[0];
         ['insuranceType', 'insuranceCompany', 'claimNumber', 'policyNumber', 'productName', 'coverageName', 'reviewerInfo', 'investigatorInfo', 'coverageDetails'].forEach(field => {
-            dataToSave[field] = first[field] ?? (field === 'coverageDetails' ? [] : "");
+            dataToSave[field] = first[field];
         });
     }
 
-    // Firestore는 'undefined' 값을 지원하지 않으므로, 모든 undefined 필드를 제거하거나 기본값으로 대체합니다.
-    Object.keys(dataToSave).forEach(key => {
-      if (dataToSave[key] === undefined) {
-        delete dataToSave[key];
-      }
-    });
-
     try {
-      if (formData.id) {
+      if (editingCase?.id) {
         // 기존 손해사정서 본문은 건드리지 않고 필드만 수정
         const { reportContent: _, id: __, ...updateFields } = dataToSave;
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', formData.id), updateFields);
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', editingCase.id), updateFields);
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'cases'), { 
           ...dataToSave, 
@@ -376,11 +468,7 @@ const App = () => {
       setIsModalOpen(false);
       setEditingCase(null);
       setDiagInput('');
-      alert("성공적으로 저장되었습니다.");
-    } catch (err) { 
-      console.error("Error saving case:", err);
-      alert("저장 중 오류가 발생했습니다: " + err.message);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const handleSaveReportData = async () => {
@@ -393,20 +481,67 @@ const App = () => {
     finally { setTimeout(() => setIsSavingReport(false), 500); }
   };
 
+  // --- 할 일 핸들러 ---
+  const handleAddTodo = async () => {
+    if (!todoInput.trim() || !user) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'todos'), {
+        text: todoInput,
+        date: selectedTodoDate,
+        completed: false,
+        createdAt: new Date().toISOString()
+      });
+      setTodoInput('');
+    } catch (err) { console.error(err); }
+  };
+
+  const handleToggleTodo = async (todo) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'todos', todo.id), { completed: !todo.completed });
+  };
+
+  const handleDeleteTodo = async (id) => {
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id));
+  };
+
   // --- 통계 및 필터링 ---
-  const stats = useMemo(() => ({
-    total: cases.length,
-    pending: cases.filter(c => c.status === '미결').length,
-    intake: cases.filter(c => c.status === '접수').length,
-    closed: cases.filter(c => c.status === '종결').length,
-    totalAmount: cases.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
-  }), [cases]);
+  const stats = useMemo(() => {
+    const now = new Date();
+    const currentMonthCases = cases.filter(c => {
+      const dateToUse = c.receptionDate || c.createdAt;
+      if (!dateToUse) return false;
+      const d = new Date(dateToUse);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    return {
+      total: cases.length,
+      pending: cases.filter(c => c.status !== '종결').length,
+      intake: currentMonthCases.length,
+      closed: cases.filter(c => c.status === '종결').length,
+      totalAmount: cases.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
+    };
+  }, [cases]);
 
   const filteredCases = cases.filter(c => {
     const diagStr = (c.diagnoses || []).join(' ');
     const searchStr = `${c.clientName || ''} ${diagStr} ${c.claimNumber || ''}`.toLowerCase();
-    return searchStr.includes(searchTerm.toLowerCase()) && (statusFilter === '전체' || c.status === statusFilter);
+    const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
+
+    if (statusFilter === '전체') return matchesSearch;
+    if (statusFilter === '당월접수') {
+      const dateToUse = c.receptionDate || c.createdAt;
+      if (!dateToUse) return false;
+      const d = new Date(dateToUse);
+      const now = new Date();
+      return matchesSearch && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }
+    if (statusFilter === '미결') return matchesSearch && c.status !== '종결';
+    return matchesSearch && c.status === statusFilter;
   });
+
+  const filteredTodos = useMemo(() => {
+    return todos.filter(t => t.date === selectedTodoDate).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [todos, selectedTodoDate]);
 
   const startReport = (caseData) => {
     setSelectedCaseForReport(caseData);
@@ -509,6 +644,77 @@ const App = () => {
     setEditingCase(prev => ({ ...prev, diagnoses: prev.diagnoses.filter((_, i) => i !== idx) }));
   };
 
+  const handleDelete = async (id) => {
+    if (!user || !window.confirm("정말 삭제하시겠습니까?")) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', id));
+    } catch (err) { console.error(err); }
+  };
+
+  // --- 데이터 백업 및 복구 기능 ---
+  const handleBackup = () => {
+    if (cases.length === 0) {
+      alert("백업할 데이터가 없습니다.");
+      return;
+    }
+    const backupData = {
+      profile: profile,
+      cases: cases,
+      backupDate: new Date().toISOString(),
+      version: "1.0"
+    };
+    const dataStr = JSON.stringify(backupData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `손사Pro_전체백업_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRestore = (e) => {
+    const file = e.target.files[0];
+    if (!file || !user) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        const casesToRestore = data.cases || (Array.isArray(data) ? data : null);
+        if (!casesToRestore || !Array.isArray(casesToRestore)) throw new Error("유효한 백업 파일이 아닙니다.");
+        if (!window.confirm(`${casesToRestore.length}건의 데이터를 복구하시겠습니까? 기존 데이터와 병합됩니다.`)) return;
+        setLoading(true);
+        for (const c of casesToRestore) {
+          const { id, ...caseData } = c;
+          await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'cases'), caseData);
+        }
+        alert("데이터 복구가 완료되었습니다.");
+      } catch (err) { alert("복구 실패: " + err.message); }
+      finally { setLoading(false); }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExportCSV = () => {
+    if (cases.length === 0) return alert("내보낼 데이터가 없습니다.");
+    const headers = ["접수일자", "의뢰인", "계약자", "보험사", "접수번호", "진단명", "상태", "예상수수료"];
+    const rows = cases.map(c => [
+      c.receptionDate || c.createdAt?.split('T')[0] || '',
+      c.clientName || '', c.contractor || '', c.insuranceCompany || '',
+      c.claimNumber || '', (c.diagnoses || []).join('/'), c.status || '미결', c.amount || 0
+    ]);
+    const csvContent = "\uFEFF" + [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `사건관리대장_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleStampUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !user) return;
@@ -556,21 +762,48 @@ const App = () => {
           </div>
         )}
 
-        <div className={`bg-white w-full ${authMode === 'signup' ? 'max-w-2xl' : 'max-w-md'} p-10 rounded-[3rem] shadow-2xl relative overflow-hidden transition-all duration-500`}>
+        <div className={`bg-white w-full ${authMode === 'signup' ? 'max-w-2xl' : 'max-w-md'} p-10 rounded-[3rem] shadow-2xl relative overflow-hidden transition-all duration-500 my-10`}>
           <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600"></div>
           <div className="flex flex-col items-center mb-10 text-center">
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-indigo-400 mb-4 shadow-xl"><ShieldCheck size={32}/></div>
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight italic underline decoration-indigo-500 decoration-4 underline-offset-4">손사Pro 마스터</h1>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight italic underline decoration-indigo-500 decoration-4 underline-offset-4">손사Pro</h1>
           </div>
           
           {authMode === 'login' && (
-            <form onSubmit={handleLogin} className="space-y-4 animate-in fade-in">
-              <div className="relative"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="email" placeholder="이메일 주소" value={loginData.email} onChange={e=>setLoginData({...loginData, email: e.target.value})} required className="w-full pl-12 pr-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-              <div className="relative"><Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="password" placeholder="비밀번호" value={loginData.password} onChange={e=>setLoginData({...loginData, password: e.target.value})} required className="w-full pl-12 pr-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-              {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
-              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"><LogIn size={18}/> 시스템 접속</button>
-              <div className="text-right"><button type="button" onClick={()=>setAuthMode('forgot')} className="text-slate-400 text-xs font-bold">비밀번호 찾기</button></div>
-            </form>
+            <div className="space-y-6 animate-in fade-in">
+              <button 
+                onClick={handleGoogleLogin} 
+                className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-black text-sm shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3"
+              >
+                <img src="https://www.gstatic.com/firebase/herojs/2/google.svg" className="w-5 h-5" alt="Google" />
+                Google 계정으로 로그인
+              </button>
+              
+              <div className="relative flex items-center py-2">
+                <div className="flex-grow border-t border-slate-100"></div>
+                <span className="flex-shrink mx-4 text-slate-300 text-[10px] font-black uppercase tracking-widest">OR</span>
+                <div className="flex-grow border-t border-slate-100"></div>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                  <input type="email" placeholder="이메일 주소" value={loginData.email} onChange={e=>setLoginData({...loginData, email: e.target.value})} required className="w-full pl-12 pr-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                  <input type="password" placeholder="비밀번호" value={loginData.password} onChange={e=>setLoginData({...loginData, password: e.target.value})} required className="w-full pl-12 pr-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+                <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+                  <LogIn size={18}/> 시스템 접속
+                </button>
+                <div className="flex justify-between px-2">
+                  <button type="button" onClick={()=>setAuthMode('forgot')} className="text-slate-400 text-xs font-bold hover:text-slate-600">비밀번호 찾기</button>
+                  <button type="button" onClick={()=>setAuthMode('signup')} className="text-indigo-600 text-xs font-black hover:underline">신규 회원가입</button>
+                </div>
+              </form>
+            </div>
           )}
 
           {authMode === 'signup' && (
@@ -596,27 +829,91 @@ const App = () => {
                   <input type="password" placeholder="비밀번호 확인" value={signUpData.passwordConfirm} onChange={e=>setSignUpData({...signUpData, passwordConfirm: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 </div>
               </div>
-              {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+              {errorMsg && <p className="text-red-500 text-xs font-black">{errorMsg}</p>}
               <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all">회원가입 완료</button>
-            </form>
-          )}
-
-          {authMode === 'forgot' && (
-            <form onSubmit={handleResetPassword} className="space-y-6 animate-in fade-in">
-              <div className="text-center"><p className="text-sm font-bold text-slate-600">등록된 이메일로 비밀번호 재설정 링크를 보냅니다.</p></div>
-              <input type="email" placeholder="가입한 이메일 주소" value={loginData.email} onChange={e=>setLoginData({...loginData, email: e.target.value})} required className="w-full px-5 py-4 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-              {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
-              {successMsg && <p className="text-emerald-500 text-xs font-black px-2">{successMsg}</p>}
-              <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-xl">메일 발송</button>
               <button type="button" onClick={()=>setAuthMode('login')} className="w-full text-slate-400 text-xs font-bold text-center underline">로그인으로 돌아가기</button>
             </form>
           )}
 
-          <div className="mt-8 pt-6 border-t text-center">
-            <button onClick={()=>{setAuthMode(authMode==='login'?'signup':'login'); setErrorMsg(''); setSuccessMsg('');}} className="text-indigo-600 text-[10px] font-black uppercase underline underline-offset-4 tracking-widest transition-colors hover:text-slate-800">
-              {authMode === 'login' ? "신규 계정 만들기" : "이미 계정이 있으신가요? 로그인하기"}
-            </button>
-          </div>
+{authMode === 'forgot' && (
+  <form onSubmit={handleResetPassword} className="space-y-6 animate-in fade-in duration-500">
+    <div className="text-center">
+      <p className="text-sm font-bold text-slate-600">등록된 이메일로 비밀번호 재설정 링크를 보냅니다.</p>
+    </div>
+    <input 
+      type="email" 
+      placeholder="가입한 이메일 주소" 
+      value={loginData.email} 
+      onChange={e => setLoginData({...loginData, email: e.target.value})} 
+      required 
+      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:border-indigo-500 transition-colors" 
+    />
+    {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+    {successMsg && <p className="text-emerald-500 text-xs font-black px-2">{successMsg}</p>}
+    
+    <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-xl active:scale-[0.98] transition-transform">
+      메일 발송
+    </button>
+    <button type="button" onClick={() => setAuthMode('login')} className="w-full text-slate-400 text-xs font-bold text-center underline">
+      로그인으로 돌아가기
+    </button>
+  </form> // </div>에서 </form>으로 수정
+)}
+
+{authMode === 'setup' && (
+  <form onSubmit={handleCompleteSetup} className="space-y-5 animate-in slide-in-from-bottom-4 duration-500">
+    <div className="text-center mb-4">
+      <p className="text-sm font-bold text-slate-600">
+        환영합니다, <span className="text-indigo-600">{user?.displayName}</span>님!<br/>
+        원활한 서비스 이용을 위해 추가 정보를 입력해주세요.
+      </p>
+    </div>
+    
+    <div className="grid grid-cols-2 gap-4">
+      <input type="tel" placeholder="연락처 (- 제외)" value={setupData.phone} onChange={e => setSetupData({...setupData, phone: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+      <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({...setupData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+    </div>
+
+    {/* ... 나머지 필드 동일 ... */}
+
+    <div className="flex gap-2">
+      <input 
+        type="text" 
+        placeholder="사무소 주소" 
+        value={setupData.address} 
+        readOnly 
+        onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} // 클릭 시에도 검색창 오픈
+        className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" 
+      />
+      <button type="button" onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
+        <MapIcon size={14}/> 주소 검색
+      </button>
+    </div>
+    
+    {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
+    
+    <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all active:scale-[0.98]">
+      가입 완료 및 시스템 접속
+    </button>
+    
+    <button type="button" onClick={() => signOut(auth)} className="w-full text-slate-400 text-xs font-bold text-center underline">
+      다른 계정으로 로그인
+    </button>
+  </form>
+)}
+
+          {authMode === 'pending' && (
+            <div className="space-y-8 animate-in zoom-in text-center py-10">
+              <div className="w-20 h-20 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <Clock size={40} />
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-xl font-black text-slate-800">승인 대기 중</h3>
+                <p className="text-sm font-bold text-slate-500 leading-relaxed">관리자의 승인이 완료된 후<br/>시스템을 이용하실 수 있습니다.</p>
+              </div>
+              <button onClick={()=>signOut(auth)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all">로그아웃</button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -627,12 +924,22 @@ const App = () => {
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-900 overflow-hidden">
       {/* Sidebar */}
       <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 print:hidden transition-all duration-500">
-        <div className="p-8">
+        <div className="p-8 flex-1 overflow-y-auto custom-scrollbar">
           <div className="flex items-center gap-3 mb-12"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg"><ShieldCheck size={24}/></div><div><span className="text-xl font-black block tracking-tighter italic">손사Pro</span><span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Master Edition</span></div></div>
           <nav className="space-y-3">
             <button onClick={()=>setView('dashboard')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='dashboard'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><LayoutDashboard size={20}/> 대시보드</button>
             <button onClick={()=>setView('list')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='list'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileText size={20}/> 사건 관리대장</button>
             <button onClick={handleNewReport} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='report'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileEdit size={20}/> 손해사정서 작성</button>
+            
+            <div className="pt-4 mt-4 border-t border-slate-800 space-y-1">
+              <p className="px-5 text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Data Management</p>
+              <button onClick={handleExportCSV} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 transition-all font-bold text-xs"><FileSearch size={18}/> 엑셀(CSV) 내보내기</button>
+              <button onClick={handleBackup} className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 transition-all font-bold text-xs"><Download size={18}/> 전체 백업(JSON)</button>
+              <label className="w-full flex items-center gap-4 px-5 py-3 rounded-xl text-slate-400 hover:bg-slate-800 transition-all font-bold text-xs cursor-pointer">
+                <CloudUpload size={18}/> 데이터 복구(Restore)
+                <input type="file" accept=".json" onChange={handleRestore} className="hidden" />
+              </label>
+            </div>
           </nav>
         </div>
         <div className="mt-auto p-8 border-t border-slate-800 bg-slate-950/50">
@@ -665,7 +972,7 @@ const App = () => {
                 <button onClick={()=>window.print()} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Printer size={18}/> PDF / 인쇄</button>
               </>
             ) : (
-              <button onClick={()=>{setEditingCase({logs:[], diagnoses: [], status: '접수', payoutAmount: 0, disabilityRate: 0, amount: 0, insurances: [{insuranceType: '자동차보험', insuranceCompany: '', claimNumber: '', policyNumber: '', productName: '', coverageName: '', reviewerInfo: '', investigatorInfo: '', coverageDetails: []}], coverageDetails: []}); setIsModalOpen(true);}} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Plus size={20}/> 사건 신규 등록</button>
+              <button onClick={()=>{setEditingCase({logs:[], diagnoses: [], status: '접수', payoutAmount: 0, disabilityRate: 0, amount: 0, insurances: [{insuranceType: '자동차보험', coverageDetails: []}], coverageDetails: [], receptionDate: new Date().toISOString().split('T')[0]}); setIsModalOpen(true);}} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Plus size={20}/> 사건 신규 등록</button>
             )}
           </div>
         </header>
@@ -675,17 +982,113 @@ const App = () => {
           {view === 'dashboard' && (
             <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
                <div className="grid grid-cols-4 gap-8">
-                {[{ label: '전체 사건', val: stats.total, color: 'indigo', icon: FileText, filter: '전체' }, { label: '미결 건수', val: stats.pending, color: 'amber', icon: Clock, filter: '미결' }, { label: '당월 접수', val: stats.intake, color: 'blue', icon: Plus, filter: '접수' }, { label: '종결 완료', val: stats.closed, color: 'emerald', icon: CheckCircle2, filter: '종결' }].map((s, i) => {
+                {[
+                  { label: '전체 사건', val: stats.total, color: 'indigo', icon: FileText, filter: '전체' },
+                  { label: '미결 건수', val: stats.pending, color: 'amber', icon: Clock, filter: '미결' },
+                  { label: '당월 접수', val: stats.intake, color: 'blue', icon: Plus, filter: '당월접수' },
+                  { label: '종결 완료', val: stats.closed, color: 'emerald', icon: CheckCircle2, filter: '종결' }
+                ].map((s, i) => {
                    const IconComp = s.icon; 
                    return (
-                    <button key={i} onClick={() => { setView('list'); setStatusFilter(s.filter); }} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-xl group text-left">
+                    <div 
+                      key={i} 
+                      onClick={() => { setView('list'); setStatusFilter(s.filter); }}
+                      className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-xl group cursor-pointer"
+                    >
                       <div className={`p-4 bg-${s.color}-50 text-${s.color}-600 rounded-2xl w-fit mb-6 group-hover:scale-110 transition-transform`}><IconComp size={24}/></div>
                       <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{s.label}</p>
                       <h3 className="text-4xl font-black text-slate-800 tracking-tighter">{s.val}<span className="text-sm ml-1 text-slate-300 font-bold">건</span></h3>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
+
+              {/* 업무 및 일정 섹션 */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* 구글 캘린더 연동 */}
+                <div className="lg:col-span-2 bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-full">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Calendar size={20}/></div>
+                      <h4 className="text-lg font-black text-slate-800 tracking-tight">구글 캘린더</h4>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setIsQuickModalOpen(true)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl transition-all text-xs font-black shadow-md"
+                      >
+                        <Plus size={16}/>
+                        <span>일정 추가</span>
+                      </button>
+                      <button
+                        onClick={handleConnectGoogle}
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-xl transition-all text-xs font-black ${googleToken ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                        title="API 연동"
+                      >
+                        {googleToken ? <CheckCircle2 size={16}/> : <Plus size={16}/>}
+                        <span>{googleToken ? 'API 연동됨' : '구글 API 연동'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-[400px] rounded-2xl overflow-hidden border border-slate-100 bg-slate-50">
+                    <iframe 
+                      key={`${user?.email || 'default'}-${calendarRefreshKey}`}
+                      src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(user?.email || 'sopy1337@gmail.com')}&ctz=Asia%2FSeoul&mode=MONTH&wkst=1&bgcolor=%23ffffff&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=0&showTz=0`} 
+                      style={{ border: 0 }} 
+                      width="100%" 
+                      height="100%" 
+                      frameBorder="0" 
+                      scrolling="no"
+                      title="Google Calendar"
+                    ></iframe>
+                  </div>
+                </div>
+
+                {/* 할 일 목록 (Memo) */}
+                <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><CheckCircle2 size={20}/></div>
+                      <h4 className="text-lg font-black text-slate-800 tracking-tight">오늘 할 일</h4>
+                    </div>
+                    <input 
+                      type="date" 
+                      value={selectedTodoDate} 
+                      onChange={e => setSelectedTodoDate(e.target.value)}
+                      className="bg-slate-50 border-none text-xs font-black text-indigo-600 outline-none px-4 py-2 rounded-xl"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 mb-6">
+                    <input 
+                      type="text" 
+                      placeholder="오늘 할 일을 입력하세요..." 
+                      className="flex-1 bg-slate-50 border border-slate-100 px-5 py-3 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                      value={todoInput}
+                      onChange={e => setTodoInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddTodo()}
+                    />
+                    <button onClick={handleAddTodo} className="px-6 bg-indigo-600 text-white rounded-2xl font-black text-xs hover:bg-indigo-700 transition-all">추가</button>
+                  </div>
+
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                    {filteredTodos.length > 0 ? filteredTodos.map(todo => (
+                      <div key={todo.id} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-50 group hover:bg-white hover:shadow-md transition-all">
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => handleToggleTodo(todo)} className={`p-1 rounded-md transition-colors ${todo.completed ? 'text-emerald-500 bg-emerald-50' : 'text-slate-300 bg-white border'}`}>
+                            <CheckCircle2 size={16}/>
+                          </button>
+                          <span className={`text-sm font-bold ${todo.completed ? 'text-slate-300 line-through' : 'text-slate-700'}`}>{todo.text}</span>
+                        </div>
+                        <button onClick={() => handleDeleteTodo(todo.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16}/></button>
+                      </div>
+                    )) : (
+                      <div className="py-10 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">기록된 할 일이 없습니다.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-slate-900 rounded-[3rem] p-16 text-white flex justify-between items-center shadow-2xl relative overflow-hidden group">
                 <div className="relative z-10">
                   <h4 className="text-indigo-400 text-xs font-black uppercase mb-6 tracking-[0.3em] animate-pulse italic">지급 예상 수수료</h4>
@@ -699,50 +1102,6 @@ const App = () => {
                   <button onClick={()=>setView('list')} className="px-10 py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl transition-all hover:scale-105">전체 사건 조회</button>
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Google Calendar Section */}
-                <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-2 mb-6">
-                    <Calendar size={20} className="text-indigo-600" />
-                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">나의 일정 (Google Calendar)</h4>
-                  </div>
-                  <div className="aspect-video w-full bg-slate-50 rounded-3xl overflow-hidden border border-slate-100">
-                    <iframe 
-                      src="https://calendar.google.com/calendar/embed?src=ko.south_korea%23holiday%40group.v.calendar.google.com&ctz=Asia%2FSeoul" 
-                      style={{ border: 0 }} 
-                      width="100%" 
-                      height="100%" 
-                      frameBorder="0" 
-                      scrolling="no"
-                    ></iframe>
-                  </div>
-                </div>
-
-                {/* To-Do Memo Section */}
-                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[500px]">
-                  <div className="flex items-center gap-2 mb-6">
-                    <PenTool size={20} className="text-indigo-600" />
-                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">오늘 할 일</h4>
-                  </div>
-                  <div className="flex gap-2 mb-6">
-                    <input type="text" placeholder="할 일을 입력하세요..." className="flex-1 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold outline-none" value={memoInput} onChange={e => setMemoInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddMemo()}/>
-                    <button onClick={handleAddMemo} className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all"><Plus size={20}/></button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                    {memos.map(memo => (
-                      <div key={memo.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl group">
-                        <div className="flex items-center gap-3">
-                          <button onClick={() => toggleMemo(memo)} className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${memo.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 bg-white'}`}>{memo.completed && <CheckCircle2 size={12} />}</button>
-                          <span className={`text-sm font-bold ${memo.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{memo.text}</span>
-                        </div>
-                        <button onClick={() => deleteMemo(memo.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
-                      </div>
-                    ))}
-                    {memos.length === 0 && <div className="text-center py-10 text-slate-300 text-xs font-bold">등록된 할 일이 없습니다.</div>}
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -751,26 +1110,66 @@ const App = () => {
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
               <div className="p-8 bg-slate-50/30 border-b flex justify-between items-center">
                 <div className="relative w-[450px]"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/><input type="text" placeholder="의뢰인, 진단명, 보험사 검색..." className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}/></div>
-                <div className="flex gap-4">{['전체', '접수', '미결', '종결'].map(s => <button key={s} onClick={()=>setStatusFilter(s)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${statusFilter===s?'bg-slate-900 text-white shadow-lg':'bg-white border text-slate-400 hover:bg-slate-50'}`}>{s}</button>)}</div>
+                <div className="flex gap-4">{['전체', '당월접수', '미결', '종결'].map(s => <button key={s} onClick={()=>setStatusFilter(s)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${statusFilter===s?'bg-slate-900 text-white shadow-lg':'bg-white border text-slate-400 hover:bg-slate-50'}`}>{s}</button>)}</div>
               </div>
-              <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50/50 text-[10px] text-slate-400 font-black uppercase tracking-widest border-b"><tr><th className="px-10 py-6">의뢰인 / 계약자</th><th className="px-8 py-6">진단명(들) / 보험사</th><th className="px-6 py-6 text-center">상태</th><th className="px-6 py-6 text-indigo-600 font-black italic text-center">예상 수수료</th><th className="px-10 py-6 text-right">업무도구</th></tr></thead><tbody className="divide-y divide-slate-50">{filteredCases.map(c => (<tr key={c.id} className="hover:bg-indigo-50/10 group transition-all"><td className="px-10 py-8 font-black text-sm text-slate-800">{c.clientName}<p className="text-[10px] text-slate-400 font-bold mt-1">계약자: {c.contractor || '-'}</p></td><td className="px-8 py-8"><div className="flex flex-wrap gap-1 mb-1">{(c.diagnoses || []).map((d, i)=><span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[9px] font-black rounded-lg">{d}</span>)}</div><p className="text-[10px] text-slate-400 font-bold uppercase">{c.insuranceCompany || '-'} ({c.claimNumber || '-'})</p></td><td className="px-6 py-8 text-center"><span className={`px-4 py-1.5 rounded-full text-[10px] font-black border ${c.status==='종결'?'bg-emerald-50 text-emerald-600 border-emerald-100':c.status==='미결'?'bg-amber-50 text-amber-600 border-amber-100':'bg-blue-50 text-blue-600 border-blue-100'}`}>{c.status}</span></td><td className="px-6 py-8 font-mono text-sm font-black text-slate-700 text-center">₩{formatComma(c.amount || 0)}</td><td className="px-10 py-8 text-right"><div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0"><button onClick={()=>startReport(c)} title="손해사정서 작성" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><FileEdit size={16}/></button><button onClick={()=>{
-                let insurances = c.insurances ? [...c.insurances] : [{
-                  insuranceType: c.insuranceType || '자동차보험',
-                  insuranceCompany: c.insuranceCompany,
-                  claimNumber: c.claimNumber,
-                  policyNumber: c.policyNumber,
-                  productName: c.productName,
-                  coverageName: c.coverageName,
-                  reviewerInfo: c.reviewerInfo,
-                  investigatorInfo: c.investigatorInfo,
-                  coverageDetails: c.coverageDetails || []
-                }];
-                if (c.insurances && c.coverageDetails?.length > 0 && !insurances[0].coverageDetails) {
-                    insurances[0] = { ...insurances[0], coverageDetails: c.coverageDetails };
-                }
-                setEditingCase({...c, insurances, coverageDetails: c.coverageDetails || []});
-                setIsModalOpen(true);
-              }} title="수정" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><Edit2 size={16}/></button><button onClick={()=>handleDelete(c.id)} title="삭제" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-red-600 shadow-sm transition-all"><Trash2 size={16}/></button></div></td></tr>))}</tbody></table></div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50/50 text-[10px] text-slate-400 font-black uppercase tracking-widest border-b">
+                    <tr>
+                      <th className="px-10 py-6">의뢰인 / 계약자</th>
+                      <th className="px-8 py-6">진단명(들) / 보험사</th>
+                      <th className="px-6 py-6 text-center">상태</th>
+                      <th className="px-6 py-6 text-indigo-600 font-black italic text-center">예상 수수료</th>
+                      <th className="px-10 py-6 text-right">업무도구</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredCases.map(c => {
+                      const dateToUse = c.receptionDate || c.createdAt;
+                      const isNew = dateToUse && new Date(dateToUse).getMonth() === new Date().getMonth() && new Date(dateToUse).getFullYear() === new Date().getFullYear();
+                      return (
+                        <tr key={c.id} className="hover:bg-indigo-50/10 group transition-all">
+                          <td className="px-10 py-8 font-black text-sm text-slate-800">
+                            <div className="flex items-center gap-2">
+                              {c.clientName}
+                              {isNew && <span className="px-2 py-0.5 bg-rose-500 text-white text-[8px] rounded-md animate-pulse">당월</span>}
+                            </div>
+                            <p className="text-[10px] text-slate-400 font-bold mt-1">계약자: {c.contractor || '-'}</p>
+                          </td>
+                          <td className="px-8 py-8"><div className="flex flex-wrap gap-1 mb-1">{(c.diagnoses || []).map((d, i)=><span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[9px] font-black rounded-lg">{d}</span>)}</div><p className="text-[10px] text-slate-400 font-bold uppercase">{c.insuranceCompany || '-'} ({c.claimNumber || '-'})</p></td>
+                          <td className="px-6 py-8 text-center"><span className={`px-4 py-1.5 rounded-full text-[10px] font-black border ${c.status==='종결'?'bg-emerald-50 text-emerald-600 border-emerald-100':'bg-amber-50 text-amber-600 border-amber-100'}`}>{c.status === '종결' ? '종결' : '미결'}</span></td>
+                          <td className="px-6 py-8 font-mono text-sm font-black text-slate-700 text-center">₩{formatComma(c.amount || 0)}</td>
+                          <td className="px-10 py-8 text-right">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                              <button onClick={()=>startReport(c)} title="손해사정서 작성" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><FileEdit size={16}/></button>
+                              <button onClick={()=>{
+                                let insurances = c.insurances ? [...c.insurances] : [{
+                                  insuranceType: c.insuranceType || '자동차보험',
+                                  insuranceCompany: c.insuranceCompany,
+                                  claimNumber: c.claimNumber,
+                                  policyNumber: c.policyNumber,
+                                  productName: c.productName,
+                                  coverageName: c.coverageName,
+                                  reviewerInfo: c.reviewerInfo,
+                                  investigatorInfo: c.investigatorInfo,
+                                  coverageDetails: c.coverageDetails || []
+                                }];
+                                setEditingCase({...c, insurances, coverageDetails: c.coverageDetails || []}); 
+                                if (c.insurances && c.coverageDetails?.length > 0 && !insurances[0].coverageDetails) {
+                                    insurances[0] = { ...insurances[0], coverageDetails: c.coverageDetails };
+                                }
+                                setEditingCase({...c, insurances});
+                                setIsModalOpen(true);
+                              }} title="수정" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><Edit2 size={16}/></button>
+                              <button onClick={()=>handleDelete(c.id)} title="삭제" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-red-600 shadow-sm transition-all"><Trash2 size={16}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -1066,7 +1465,8 @@ const App = () => {
                 {/* 1. 기본 및 사고 */}
                 <section className="space-y-5">
                   <div className="flex items-center gap-2 border-l-4 border-indigo-600 pl-4"><h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">기본 및 사고 정보</h4></div>
-                  <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-3 gap-5">
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">접수일자</label><input type="date" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.receptionDate || ''} onChange={e=>setEditingCase(prev=>({...prev, receptionDate: e.target.value}))}/></div>
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">계약자 / 의뢰인</label><div className="flex gap-2">
                       <input type="text" placeholder="계약자" className="w-1/2 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.contractor || ''} onChange={e=>setEditingCase(prev=>({...prev, contractor: e.target.value}))}/>
                       <input type="text" placeholder="의뢰인" className="w-1/2 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.clientName || ''} onChange={e=>setEditingCase(prev=>({...prev, clientName: e.target.value}))}/>
@@ -1088,18 +1488,11 @@ const App = () => {
                       ))}
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">사고내용</label>
-                    <textarea placeholder="사고내용을 상세히 기재하세요" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none resize-none h-24" value={editingCase?.accidentDetails || ''} onChange={e=>setEditingCase(prev=>({...prev, accidentDetails: e.target.value}))}/>
-                  </div>
                   <div className="grid grid-cols-2 gap-5">
-                    <input type="text" placeholder="연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.phone || ''} onChange={e=>setEditingCase(prev=>({...prev, phone: formatPhone(e.target.value)}))}/>
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                          <input type="text" placeholder="기본 주소" value={editingCase?.address || ''} readOnly className="flex-1 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm" />
-                          <button type="button" onClick={() => handleOpenAddr(addr => setEditingCase(prev=>({...prev, address: addr})))} className="px-6 bg-slate-900 text-white rounded-2xl text-[10px] font-black hover:bg-black flex items-center gap-2"><MapIcon size={14}/> FIND</button>
-                      </div>
-                      <input type="text" placeholder="상세 주소 입력" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.detailAddress || ''} onChange={e=>setEditingCase(prev=>({...prev, detailAddress: e.target.value}))}/>
+                    <input type="text" placeholder="연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.phone || ''} onChange={e=>setEditingCase(prev=>({...prev, phone: e.target.value}))}/>
+                    <div className="flex gap-2">
+                        <input type="text" placeholder="상세 주소" value={editingCase?.address || ''} readOnly className="flex-1 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm" />
+                        <button type="button" onClick={() => handleOpenAddr(addr => setEditingCase(prev=>({...prev, address: addr})))} className="px-6 bg-slate-900 text-white rounded-2xl text-[10px] font-black hover:bg-black flex items-center gap-2"><MapIcon size={14}/> FIND</button>
                     </div>
                   </div>
                 </section>
@@ -1111,7 +1504,7 @@ const App = () => {
                       <div className="flex items-center gap-2 border-l-4 border-emerald-500 pl-4"><h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">보험 상세 정보 #{idx + 1}</h4></div>
                       {idx > 0 && <button onClick={()=>setEditingCase(prev=>{
                         const newInsurances = prev.insurances.filter((_, i)=>i!==idx);
-                        const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.estimatedAmount) || 0), 0), 0);
+                        const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.amount) || 0), 0), 0);
                         return {...prev, insurances: newInsurances, payoutAmount: total};
                       })} className="text-red-500 text-xs font-black hover:underline">삭제</button>}
                     </div>
@@ -1144,44 +1537,35 @@ const App = () => {
                     </div>
                     <div className="space-y-3 pt-2 border-t border-dashed border-slate-200">
                         <div className="flex items-center gap-2"><h5 className="text-xs font-black text-slate-500 uppercase tracking-tight">담보별 예상 지급액</h5></div>
-                        <div className="grid grid-cols-3 gap-2">
-                            <input type="text" id={`covName-${idx}`} placeholder="담보명" className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold text-xs outline-none" />
-                            <input type="text" id={`covInsured-${idx}`} placeholder="가입금액" className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold text-xs outline-none" onKeyUp={(e) => e.target.value = formatComma(unformatComma(e.target.value))} />
-                            <div className="flex gap-2">
-                                <input type="text" id={`covEstimated-${idx}`} placeholder="예상금액" className="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold text-xs outline-none" onKeyUp={(e) => e.target.value = formatComma(unformatComma(e.target.value))} />
-                                <button type="button" onClick={()=>{
-                                    const nameInput = document.getElementById(`covName-${idx}`);
-                                    const insuredInput = document.getElementById(`covInsured-${idx}`);
-                                    const estimatedInput = document.getElementById(`covEstimated-${idx}`);
-                                    const name = nameInput.value;
-                                    const insuredAmount = unformatComma(insuredInput.value);
-                                    const estimatedAmount = unformatComma(estimatedInput.value);
-                                    if(!name) return;
-                                    setEditingCase(prev => {
-                                        const newInsurances = [...(prev.insurances || [])];
-                                        newInsurances[idx] = { ...newInsurances[idx], coverageDetails: [...(newInsurances[idx].coverageDetails || []), { name, insuredAmount, estimatedAmount }] };
-                                        const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.estimatedAmount) || 0), 0), 0);
-                                        return { ...prev, insurances: newInsurances, payoutAmount: total };
-                                    });
-                                    nameInput.value='';
-                                    insuredInput.value='';
-                                    estimatedInput.value='';
-                                }} className="px-4 bg-slate-800 text-white rounded-xl font-black text-[10px] hover:bg-black transition-all">추가</button>
-                            </div>
+                        <div className="flex gap-2">
+                            <input type="text" id={`covName-${idx}`} placeholder="담보명" className="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold text-xs outline-none" />
+                            <input type="text" id={`covAmt-${idx}`} placeholder="금액" className="w-1/3 bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold text-xs outline-none" onKeyUp={(e) => e.target.value = formatComma(unformatComma(e.target.value))} />
+                            <button type="button" onClick={()=>{
+                                const nameInput = document.getElementById(`covName-${idx}`);
+                                const amtInput = document.getElementById(`covAmt-${idx}`);
+                                const name = nameInput.value;
+                                const amt = unformatComma(amtInput.value);
+                                if(!name) return;
+                                setEditingCase(prev => {
+                                    const newInsurances = [...(prev.insurances || [])];
+                                    newInsurances[idx] = { ...newInsurances[idx], coverageDetails: [...(newInsurances[idx].coverageDetails || []), { name, amount: amt }] };
+                                    const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.amount) || 0), 0), 0);
+                                    return { ...prev, insurances: newInsurances, payoutAmount: total };
+                                });
+                                nameInput.value='';
+                                amtInput.value='';
+                            }} className="px-4 bg-slate-800 text-white rounded-xl font-black text-[10px] hover:bg-black transition-all">추가</button>
                         </div>
                         <div className="space-y-1">
                             {(ins.coverageDetails || []).map((item, cIdx) => (
                             <div key={cIdx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                <div className="flex flex-col">
-                                    <span className="font-bold text-xs text-slate-700">{item.name}</span>
-                                    <span className="text-[10px] text-slate-400">가입: ₩{formatComma(item.insuredAmount)}</span>
-                                </div>
+                                <span className="font-bold text-xs text-slate-700">{item.name}</span>
                                 <div className="flex items-center gap-3">
-                                <span className="font-mono font-black text-xs text-indigo-600">예상: ₩{formatComma(item.estimatedAmount)}</span>
+                                <span className="font-mono font-black text-xs text-indigo-600">₩{formatComma(item.amount)}</span>
                                 <button type="button" onClick={()=>setEditingCase(prev => {
                                     const newInsurances = [...(prev.insurances || [])];
                                     newInsurances[idx] = { ...newInsurances[idx], coverageDetails: newInsurances[idx].coverageDetails.filter((_, i) => i !== cIdx) };
-                                    const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.estimatedAmount) || 0), 0), 0);
+                                    const total = newInsurances.reduce((acc, ins) => acc + (ins.coverageDetails || []).reduce((s, d) => s + (Number(d.amount) || 0), 0), 0);
                                     return { ...prev, insurances: newInsurances, payoutAmount: total };
                                 })} className="text-slate-300 hover:text-red-500"><Trash2 size={12}/></button>
                                 </div>
@@ -1206,7 +1590,7 @@ const App = () => {
                 {/* 4. 상태 설정 */}
                 <section className="space-y-5 pt-5 border-t border-slate-100">
                   <div className="flex gap-4">
-                    {['접수', '미결', '종결'].map(s => <button key={s} type="button" onClick={()=>setEditingCase(prev=>({...prev, status: s}))} className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all border-2 ${editingCase?.status===s?'bg-indigo-600 border-indigo-600 text-white shadow-xl scale-105':'bg-white border-slate-100 text-slate-400'}`}>{s} 처리</button>)}
+                    {['미결', '종결'].map(s => <button key={s} type="button" onClick={()=>setEditingCase(prev=>({...prev, status: s}))} className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all border-2 ${editingCase?.status===s || (s==='미결' && editingCase?.status!=='종결') ?'bg-indigo-600 border-indigo-600 text-white shadow-xl scale-105':'bg-white border-slate-100 text-slate-400'}`}>{s} 처리</button>)}
                   </div>
                 </section>
 
@@ -1231,16 +1615,22 @@ const App = () => {
                     <div className="flex gap-2">
                         <input type="text" placeholder="상세 내용" className="flex-1 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.scheduleDesc || ''} onChange={e=>setEditingCase(prev=>({...prev, scheduleDesc: e.target.value}))}/>
                         <button type="button" onClick={() => {
-                            const { scheduleDate, scheduleTime, scheduleTitle, scheduleDesc, address } = editingCase || {};
-                            if (!scheduleDate || !scheduleTime) return alert("날짜와 시간을 입력해주세요.");
-                            const start = new Date(`${scheduleDate}T${scheduleTime}`);
-                            const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
-                            const fmt = d => d.toISOString().replace(/-|:|\.\d{3}/g, "");
-                            const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(scheduleTitle || '의뢰인 미팅')}&dates=${fmt(start)}/${fmt(end)}&details=${encodeURIComponent(scheduleDesc || '')}&location=${encodeURIComponent(address || '')}`;
-                            window.open(url, '_blank');
+                            if (!editingCase?.scheduleDate || !editingCase?.scheduleTime) return alert("날짜와 시간을 입력해주세요.");
+                            if (googleToken) {
+                              saveToGoogleCalendarAPI(editingCase);
+                            } else {
+                              // 기존 방식 (Fallback)
+                              const { scheduleDate, scheduleTime, scheduleTitle, scheduleDesc, address } = editingCase;
+                              const start = new Date(`${scheduleDate}T${scheduleTime}`);
+                              const end = new Date(start.getTime() + 60 * 60 * 1000);
+                              const pad = n => n.toString().padStart(2, '0');
+                              const fmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+                              const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(scheduleTitle || '의뢰인 미팅')}&dates=${fmt(start)}/${fmt(end)}&details=${encodeURIComponent(scheduleDesc || '')}&location=${encodeURIComponent(address || '')}`;
+                              window.open(url, '_blank');
+                            }
 
                             // 기록 관리 연동: 일정 등록 시 로그 자동 추가
-                            const logContent = `[일정 등록] ${scheduleDate} ${scheduleTime}\n제목: ${scheduleTitle || '의뢰인 미팅'}\n내용: ${scheduleDesc || '-'}`;
+                            const logContent = `[일정 등록] ${editingCase.scheduleDate} ${editingCase.scheduleTime}\n제목: ${editingCase.scheduleTitle || '의뢰인 미팅'}\n내용: ${editingCase.scheduleDesc || '-'}`;
                             setEditingCase(prev => ({ ...prev, logs: [{ id: Date.now(), date: new Date().toISOString().split('T')[0], content: logContent }, ...(prev.logs || [])] }));
                         }} className="px-6 bg-blue-600 text-white rounded-2xl font-black text-xs hover:bg-blue-700 transition-all flex items-center gap-2">
                             <Calendar size={16}/> 캘린더 등록
@@ -1348,6 +1738,54 @@ const App = () => {
               <button onClick={()=>setIsAddrOpen(false)} className="p-2 hover:text-red-500"><X size={20}/></button>
             </div>
             <div id="addr-layer" className="w-full h-[500px]"></div>
+          </div>
+        </div>
+      )}
+
+      {/* 퀵 일정 추가 모달 */}
+      {isQuickModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[70] font-sans">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+            <div className="px-8 py-6 border-b flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-lg font-black text-slate-800 tracking-tight">빠른 일정 추가</h3>
+              <button onClick={() => setIsQuickModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={20}/></button>
+            </div>
+            <div className="p-8 space-y-5">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase px-1 tracking-widest">일정 제목</label>
+                <input type="text" placeholder="예: 의뢰인 미팅" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500" value={quickEvent.scheduleTitle} onChange={e => setQuickEvent({...quickEvent, scheduleTitle: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-1 tracking-widest">날짜</label>
+                  <input type="date" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={quickEvent.scheduleDate} onChange={e => setQuickEvent({...quickEvent, scheduleDate: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-1 tracking-widest">시간</label>
+                  <input type="time" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={quickEvent.scheduleTime} onChange={e => setQuickEvent({...quickEvent, scheduleTime: e.target.value})} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase px-1 tracking-widest">상세 내용</label>
+                <textarea placeholder="일정 상세 내용을 입력하세요..." rows={3} className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none" value={quickEvent.scheduleDesc} onChange={e => setQuickEvent({...quickEvent, scheduleDesc: e.target.value})} />
+              </div>
+              <button 
+                onClick={async () => {
+                  if (!quickEvent.scheduleTitle) return alert("제목을 입력해주세요.");
+                  await saveToGoogleCalendarAPI(quickEvent);
+                  setIsQuickModalOpen(false);
+                  setQuickEvent({
+                    scheduleTitle: '',
+                    scheduleDate: new Date().toISOString().split('T')[0],
+                    scheduleTime: new Date().toTimeString().slice(0, 5),
+                    scheduleDesc: ''
+                  });
+                }}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all"
+              >
+                캘린더에 즉시 등록
+              </button>
+            </div>
           </div>
         </div>
       )}
