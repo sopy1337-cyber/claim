@@ -17,7 +17,8 @@ import {
 import { 
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
   signOut, onAuthStateChanged, signInWithCustomToken,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  RecaptchaVerifier, signInWithPhoneNumber
 } from 'firebase/auth';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -53,10 +54,7 @@ const unformatComma = (val) => {
 
 const formatPhone = (val) => {
   if (!val) return "";
-  const num = val.replace(/[^0-9]/g, "");
-  if (num.length <= 3) return num;
-  if (num.length <= 7) return `${num.slice(0, 3)}-${num.slice(3)}`;
-  return `${num.slice(0, 3)}-${num.slice(3, 7)}-${num.slice(7, 11)}`;
+  return val.replace(/[^0-9]/g, "");
 };
 
 // --- 리포트용 헬퍼 컴포넌트 ---
@@ -94,6 +92,11 @@ const App = () => {
     email: '', password: '', passwordConfirm: '',
     name: '', phone: '', company: '', position: '', address: '', licenseNo: ''
   });
+
+  const [verificationId, setVerificationId] = useState(null);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isCodeSent, setIsCodeSent] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   const [isAddrOpen, setIsAddrOpen] = useState(false);
   const [view, setView] = useState('dashboard');
@@ -292,10 +295,60 @@ const App = () => {
     finally { setLoading(false); }
   };
 
+  const handleSendCode = async () => {
+    if (!signUpData.phone) {
+      alert("연락처를 입력해주세요.");
+      return;
+    }
+
+    try {
+      // reCAPTCHA 초기화 (중복 생성 방지)
+      if (!window.recaptchaVerifier) {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible'
+        });
+      }
+
+      // 전화번호 포맷팅 로직 개선 (Firebase 표준 E.164 대응)
+      const rawPhone = signUpData.phone.replace(/[^0-9]/g, "");
+      const formattedPhone = rawPhone.startsWith('0') 
+        ? `+82${rawPhone.substring(1)}` 
+        : (rawPhone.startsWith('82') ? `+${rawPhone}` : `+82${rawPhone}`);
+
+      const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, window.recaptchaVerifier);
+      setVerificationId(confirmationResult);
+      setIsCodeSent(true);
+      alert("인증번호가 발송되었습니다.");
+    } catch (error) {
+      console.error("SMS 발송 실패:", error);
+      // 에러 발생 시 리캡차 초기화 (재시도 가능하도록)
+      if (window.recaptchaVerifier) {
+        window.recaptchaVerifier.clear();
+        window.recaptchaVerifier = null;
+      }
+      alert("인증번호 발송에 실패했습니다. 번호를 확인하거나 잠시 후 다시 시도해주세요.");
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    if (!verificationId) return;
+    try {
+      await verificationId.confirm(verificationCode);
+      setIsVerified(true);
+      alert("인증에 성공했습니다.");
+    } catch (error) {
+      alert("인증번호가 일치하지 않거나 만료되었습니다.");
+    }
+  };
+
   const handleSignUp = async (e) => {
     e.preventDefault();
     if (signUpData.password !== signUpData.passwordConfirm) {
       setErrorMsg("비밀번호가 일치하지 않습니다.");
+      return;
+    }
+    if (!isVerified) {
+      setErrorMsg("연락처 인증이 필요합니다.");
       return;
     }
     try {
@@ -577,8 +630,36 @@ const App = () => {
             <form onSubmit={handleSignUp} className="space-y-5 animate-in slide-in-from-bottom-4">
               <div className="grid grid-cols-2 gap-4">
                 <input type="text" placeholder="성명" value={signUpData.name} onChange={e=>setSignUpData({...signUpData, name: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-                <input type="text" placeholder="연락처" value={signUpData.phone} onChange={e=>setSignUpData({...signUpData, phone: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <div className="relative flex gap-2">
+                  <input type="text" placeholder="연락처" value={signUpData.phone} onChange={e=>setSignUpData({...signUpData, phone: formatPhone(e.target.value)})} required disabled={isVerified} className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  {!isVerified && (
+                    <button type="button" onClick={handleSendCode} className="px-4 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase">
+                      {isCodeSent ? "재발송" : "인증요청"}
+                    </button>
+                  )}
+                  {isVerified && <div className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black text-xs">인증됨</div>}
+                </div>
               </div>
+              {isCodeSent && !isVerified && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <label className="text-[10px] font-black text-indigo-600 uppercase px-2 tracking-widest">인증번호 입력</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-400" size={18}/>
+                      <input 
+                        type="text" 
+                        maxLength={6}
+                        placeholder="6자리 숫자 입력" 
+                        value={verificationCode} 
+                        onChange={e => setVerificationCode(e.target.value.replace(/[^0-9]/g, ""))} 
+                        className="w-full pl-12 pr-5 py-3.5 bg-indigo-50 border border-indigo-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" 
+                      />
+                    </div>
+                    <button type="button" onClick={handleVerifyCode} className="px-8 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all">인증 확인</button>
+                  </div>
+                  <p className="text-[9px] text-slate-400 px-2 font-bold">* 카카오톡 또는 SMS로 발송된 번호를 입력해주세요.</p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <input type="text" placeholder="업체명" value={signUpData.company} onChange={e=>setSignUpData({...signUpData, company: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <input type="text" placeholder="직책" value={signUpData.position} onChange={e=>setSignUpData({...signUpData, position: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
@@ -600,6 +681,7 @@ const App = () => {
               <button type="submit" className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all">회원가입 완료</button>
             </form>
           )}
+          <div id="recaptcha-container"></div>
 
           {authMode === 'forgot' && (
             <form onSubmit={handleResetPassword} className="space-y-6 animate-in fade-in">
