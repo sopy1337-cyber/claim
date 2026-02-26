@@ -108,12 +108,12 @@ const App = () => {
     address: '',
     detailAddress: '',
     licenseNo: '',
-    licenseType: '신체'
+    licenseType: ''
   });
 
   // 구글 로그인 후 최초 1회 추가 정보 입력 상태
   const [setupData, setSetupData] = useState({
-    name: '', email: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: '신체'
+    name: '', email: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: ''
   });
 
   const [verificationId, setVerificationId] = useState(null);
@@ -298,6 +298,10 @@ const App = () => {
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential) setGoogleToken(credential.accessToken);
+      // 가입 양식 이메일 자동 기입
+      if (result.user && result.user.email) {
+        setSignUpData(prev => ({ ...prev, email: result.user.email }));
+      }
     } catch (err) {
       console.error(err);
       setErrorMsg("구글 로그인에 실패했습니다. 팝업 차단 여부를 확인하세요.");
@@ -385,7 +389,7 @@ const App = () => {
           address: signUpData.address,
           detailAddress: signUpData.detailAddress,
           licenseNo: signUpData.licenseNo,
-          licenseType: setupData.licenseType || '신체',
+          licenseType: signUpData.licenseType,
           approved: false, // 승인 대기 상태로 시작
           createdAt: new Date().toISOString()
         };
@@ -477,7 +481,7 @@ const App = () => {
           address: setupData.address,
           detailAddress: setupData.detailAddress,
           licenseNo: setupData.licenseNo,
-          licenseType: setupData.licenseType || '신체',
+          licenseType: setupData.licenseType,
           approved: false, // 승인 대기 상태로 시작
           createdAt: new Date().toISOString()
         };
@@ -966,13 +970,6 @@ const App = () => {
                     {isVerified && <div className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black text-xs">인증됨</div>}
                   </div>
                 </div>
-                <button
-                  onClick={handleGoogleLogin}
-                  className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-black text-sm shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3"
-                >
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-                  Google 계정으로 로그인
-                </button>
                 {isCodeSent && !isVerified && (
                     <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                       <label className="text-[10px] font-black text-indigo-600 uppercase px-2 tracking-widest">인증번호 입력</label>
@@ -1002,28 +999,21 @@ const App = () => {
                     <button type="button" onClick={() => handleOpenAddr(addr => setSignUpData({ ...signUpData, address: addr }))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2"><MapIcon size={14} /> 주소 검색</button>
                   </div>
                   <input type="text" placeholder="상세 주소" value={signUpData.detailAddress} onChange={e => setSignUpData({ ...signUpData, detailAddress: e.target.value })} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-                  <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e => setSignUpData({ ...signUpData, licenseNo: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <select
-                      value={signUpData.licenseType || '신체'}
-                      onChange={e => setSignUpData({ ...signUpData, licenseType: e.target.value })}
-                      className="col-span-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none"
-                    >
-                      <option value="신체">신체</option>
-                      <option value="재물">재물</option>
-                      <option value="차량">차량</option>
-                      <option value="종합">종합</option>
-                      <option value="1종">1종</option>
-                      <option value="2종">2종</option>
-                      <option value="3종">3종</option>
-                      <option value="4종">4종</option>
-                    </select>
-                    <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e => setSignUpData({ ...signUpData, licenseNo: e.target.value })} required className="col-span-2 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <input type="text" placeholder="자격종류 (예: 신체)" value={signUpData.licenseType} onChange={e => setSignUpData({ ...signUpData, licenseType: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                    <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e => setSignUpData({ ...signUpData, licenseNo: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                   </div>
-
                   <div className="border-t pt-5 space-y-4">
-                    <input type="email" placeholder="사용할 이메일 (ID)" value={signUpData.email} onChange={e => setSignUpData({ ...signUpData, email: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-black text-sm shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3"
+                    >
+                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                      Google 계정으로 로그인하여 이메일 가져오기
+                    </button>
+
+                    <input type="email" placeholder="구글 로그인으로 이메일을 입력하세요" value={signUpData.email} readOnly required className="w-full px-5 py-3.5 bg-slate-100 border rounded-2xl text-sm font-bold outline-none text-slate-500 cursor-not-allowed" />
                     <div className="grid grid-cols-2 gap-4">
                       <input type="password" placeholder="비밀번호" value={signUpData.password} onChange={e => setSignUpData({ ...signUpData, password: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                       <input type="password" placeholder="비밀번호 확인" value={signUpData.passwordConfirm} onChange={e => setSignUpData({ ...signUpData, passwordConfirm: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
@@ -1096,26 +1086,10 @@ const App = () => {
               </div>
 
               <input type="text" placeholder="상세 주소" value={setupData.detailAddress} onChange={e => setSetupData({ ...setupData, detailAddress: e.target.value })} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-              <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({ ...setupData, licenseNo: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-
-              <div className="grid grid-cols-3 gap-4">
-                <select
-                  value={setupData.licenseType || '신체'}
-                  onChange={e => setSetupData({ ...setupData, licenseType: e.target.value })}
-                  className="col-span-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none"
-                >
-                  <option value="신체">신체</option>
-                  <option value="재물">재물</option>
-                  <option value="차량">차량</option>
-                  <option value="종합">종합</option>
-                  <option value="1종">1종</option>
-                  <option value="2종">2종</option>
-                  <option value="3종">3종</option>
-                  <option value="4종">4종</option>
-                </select>
-                <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({ ...setupData, licenseNo: e.target.value })} required className="col-span-2 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+              <div className="grid grid-cols-2 gap-4">
+                <input type="text" placeholder="자격종류 (예: 신체)" value={setupData.licenseType} onChange={e => setSetupData({ ...setupData, licenseType: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({ ...setupData, licenseNo: e.target.value })} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               </div>
-
               {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
 
               <div className="flex gap-3 pt-2">
