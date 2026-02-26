@@ -52,6 +52,21 @@ const unformatComma = (val) => {
   return Number(num) || 0;
 };
 
+// --- 유틸리티: Firestore 저장용 데이터 정제 (undefined 제거) ---
+const cleanData = (obj) => {
+  if (Array.isArray(obj)) {
+    return obj.map(v => (v && typeof v === 'object') ? cleanData(v) : v);
+  }
+  const newObj = {};
+  Object.keys(obj).forEach(key => {
+    const value = obj[key];
+    if (value !== undefined) {
+      newObj[key] = (value && typeof value === 'object') ? cleanData(value) : value;
+    }
+  });
+  return newObj;
+};
+
 const formatPhone = (val) => {
   if (!val) return "";
   return val.replace(/[^0-9]/g, "");
@@ -70,6 +85,7 @@ const calculateWorkMonths = (birthDate, accidentDate) => {
   if (!birthDate || !accidentDate) return 0;
   const birth = new Date(birthDate);
   const accident = new Date(accidentDate);
+  if (isNaN(birth.getTime()) || isNaN(accident.getTime())) return 0;
   const retirementDate = new Date(birth.getFullYear() + 65, birth.getMonth(), birth.getDate());
   
   if (accident >= retirementDate) return 0;
@@ -82,16 +98,17 @@ const calculateWorkMonths = (birthDate, accidentDate) => {
 };
 
 const calculateHoffman = (months) => {
-  if (!months || months <= 0) return 0;
+  const m = Math.floor(Number(months) || 0);
+  if (m <= 0) return 0;
   let total = 0;
   const monthlyRate = 0.05 / 12; // 연 5% 단리 기준 월 이율
   
-  for (let i = 1; i <= months; i++) {
+  for (let i = 1; i <= m; i++) {
     total += 1 / (1 + i * monthlyRate);
   }
   
   // 호프만 계수는 일반적으로 240을 초과할 수 없음 (실무 원칙)
-  return Math.min(total, 240).toFixed(4);
+  return Number(Math.min(total, 240).toFixed(4));
 };
 
 // --- 리포트용 헬퍼 컴포넌트 ---
@@ -203,7 +220,15 @@ const App = () => {
     diagnosis: '', hospDays: 0, outDays: 0, initialWeeks: 0,
     injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
     lostWagesMultiplier: 0.85,
-    lostWagesDays: 0
+    lostWagesDays: 0,
+    lostWagesIncome: 0,
+    lostEarningsIncome: 0,
+    lostEarningsRate: 0,
+    lostEarningsHoffman: 0,
+    isLostWagesManual: false,
+    isLostEarningsManual: false,
+    lostWagesPeriods: [{ income: 0, days: 0, multiplier: 0.85 }],
+    lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }]
   });
   const [selectedCalcCaseId, setSelectedCalcCaseId] = useState('');
 
@@ -215,7 +240,7 @@ const App = () => {
     try {
       setLoading(true);
       await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', selectedCalcCaseId), {
-        standaloneCalcData: standaloneCalc
+        standaloneCalcData: cleanData(standaloneCalc)
       });
       alert("산출 데이터가 고객 정보에 저장되었습니다.");
     } catch (err) {
@@ -237,7 +262,15 @@ const App = () => {
       const data = targetCase.standaloneCalcData;
       setStandaloneCalc({
         ...data,
-        lostWagesDays: data.lostWagesDays !== undefined ? data.lostWagesDays : (data.hospDays || 0)
+        lostWagesDays: data.lostWagesDays !== undefined ? data.lostWagesDays : (data.hospDays || 0),
+        lostWagesIncome: data.lostWagesIncome || data.monthlyIncome || 0,
+        lostEarningsIncome: data.lostEarningsIncome || data.monthlyIncome || 0,
+        lostEarningsRate: data.lostEarningsRate || data.lossRate || 0,
+        lostEarningsHoffman: data.lostEarningsHoffman || data.hoffman || 0,
+        isLostWagesManual: data.isLostWagesManual || false,
+        isLostEarningsManual: data.isLostEarningsManual || false,
+        lostWagesPeriods: data.lostWagesPeriods || [{ income: data.lostWagesIncome || data.monthlyIncome || 0, days: data.lostWagesDays || 0, multiplier: data.lostWagesMultiplier || 0.85 }],
+        lostEarningsPeriods: data.lostEarningsPeriods || [{ income: data.lostEarningsIncome || data.monthlyIncome || 0, rate: data.lostEarningsRate || data.lossRate || 0, hoffman: data.lostEarningsHoffman || data.hoffman || 0 }]
       });
     } else {
       setStandaloneCalc({
@@ -250,34 +283,89 @@ const App = () => {
         hospDays: 0, outDays: 0, initialWeeks: 0,
         injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
         lostWagesMultiplier: 0.85,
-        lostWagesDays: 0
+        lostWagesDays: 0,
+        lostWagesIncome: 0,
+        lostEarningsIncome: 0,
+        lostEarningsRate: 0,
+        lostEarningsHoffman: 0,
+        isLostWagesManual: false,
+        isLostEarningsManual: false,
+        lostWagesPeriods: [{ income: 0, days: 0, multiplier: 0.85 }],
+        lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }]
       });
     }
   };
 
-  // 휴업손해액 자동 계산 (월소득/30 * 입원일수 * 계수)
+  // --- 손해배상금 자동 계산 통합 로직 ---
   useEffect(() => {
-    const income = Number(standaloneCalc.monthlyIncome) || 0;
-    const days = Number(standaloneCalc.lostWagesDays) || 0;
-    const multiplier = (standaloneCalc.lostWagesMultiplier === '' || standaloneCalc.lostWagesMultiplier === undefined) ? 0.85 : Number(standaloneCalc.lostWagesMultiplier);
-    const calculated = Math.floor((income / 30) * days * multiplier);
-    
-    if (standaloneCalc.lostWages !== calculated) {
-      setStandaloneCalc(prev => ({ ...prev, lostWages: calculated }));
+    let lostWages = 0;
+    if (standaloneCalc.isLostWagesManual) {
+      lostWages = (standaloneCalc.lostWagesPeriods || []).reduce((sum, p) => {
+        return sum + Math.floor((Number(p.income) || 0) / 30 * (Number(p.days) || 0) * (Number(p.multiplier) || 0.85));
+      }, 0);
+    } else {
+      const income = Number(standaloneCalc.monthlyIncome) || 0;
+      const days = Number(standaloneCalc.lostWagesDays) || 0;
+      const multiplier = (standaloneCalc.lostWagesMultiplier === '' || standaloneCalc.lostWagesMultiplier === undefined) ? 0.85 : Number(standaloneCalc.lostWagesMultiplier);
+      lostWages = Math.floor((income / 30) * days * multiplier);
     }
-  }, [standaloneCalc.monthlyIncome, standaloneCalc.lostWagesDays, standaloneCalc.lostWagesMultiplier]);
 
-  // 상실수익액 자동 계산 (월소득 * 상실률 * 호프만계수)
-  useEffect(() => {
-    const income = Number(standaloneCalc.monthlyIncome) || 0;
-    const rate = Number(standaloneCalc.lossRate) || 0;
-    const hoffman = Number(standaloneCalc.hoffman) || 0;
-    const calculated = Math.floor(income * (rate / 100) * hoffman);
-    
-    if (standaloneCalc.lostEarnings !== calculated) {
-      setStandaloneCalc(prev => ({ ...prev, lostEarnings: calculated }));
+    let lostEarnings = 0;
+    if (standaloneCalc.isLostEarningsManual) {
+      lostEarnings = (standaloneCalc.lostEarningsPeriods || []).reduce((sum, p) => {
+        return sum + Math.floor((Number(p.income) || 0) * ((Number(p.rate) || 0) / 100) * (Number(p.hoffman) || 0));
+      }, 0);
+    } else {
+      const income = Number(standaloneCalc.monthlyIncome) || 0;
+      const rate = Number(standaloneCalc.lossRate) || 0;
+      const hoffman = Number(standaloneCalc.hoffman) || 0;
+      lostEarnings = Math.floor(income * (rate / 100) * hoffman);
     }
-  }, [standaloneCalc.monthlyIncome, standaloneCalc.lossRate, standaloneCalc.hoffman]);
+
+    // 위자료 자동 계산 (부상 vs 후유장해 중 높은 금액)
+    const gradeNum = parseInt(standaloneCalc.injuryGrade?.toString().replace(/[^0-9]/g, ""));
+    let injuryAlimony = 0;
+    if (!isNaN(gradeNum)) {
+      const injuryTable = {
+        1: 2000000, 2: 1760000, 3: 1520000, 4: 1280000, 5: 1040000,
+        6: 800000, 7: 560000, 8: 400000, 9: 240000, 10: 200000,
+        11: 160000, 12: 150000, 13: 150000, 14: 150000
+      };
+      injuryAlimony = injuryTable[gradeNum] || 0;
+    }
+
+    const lossRateVal = Number(standaloneCalc.lossRate) || 0;
+    let calculatedAlimony = standaloneCalc.alimony;
+    const isAutoAlimony = lossRateVal < 50;
+
+    if (isAutoAlimony) {
+      let disabilityAlimony = 0;
+      if (lossRateVal >= 45) disabilityAlimony = 4000000;
+      else if (lossRateVal >= 35) disabilityAlimony = 2400000;
+      else if (lossRateVal >= 27) disabilityAlimony = 2000000;
+      else if (lossRateVal >= 20) disabilityAlimony = 1600000;
+      else if (lossRateVal >= 14) disabilityAlimony = 1200000;
+      else if (lossRateVal >= 9) disabilityAlimony = 1000000;
+      else if (lossRateVal >= 5) disabilityAlimony = 800000;
+      else if (lossRateVal > 0) disabilityAlimony = 500000;
+
+      calculatedAlimony = Math.max(injuryAlimony, disabilityAlimony);
+    }
+    
+    if (standaloneCalc.lostWages !== lostWages || standaloneCalc.lostEarnings !== lostEarnings || (isAutoAlimony && standaloneCalc.alimony !== calculatedAlimony)) {
+      setStandaloneCalc(prev => ({ 
+        ...prev, 
+        lostWages, 
+        lostEarnings, 
+        ...(isAutoAlimony ? { alimony: calculatedAlimony } : {}) 
+      }));
+    }
+  }, [
+    standaloneCalc.monthlyIncome, standaloneCalc.lostWagesDays, standaloneCalc.lostWagesMultiplier, 
+    standaloneCalc.isLostWagesManual, standaloneCalc.lostWagesPeriods,
+    standaloneCalc.lossRate, standaloneCalc.hoffman, standaloneCalc.isLostEarningsManual, standaloneCalc.lostEarningsPeriods,
+    standaloneCalc.injuryGrade
+  ]);
 
   const standaloneResult = useMemo(() => {
     const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, otherDamages, alimony, faultPercent } = standaloneCalc;
@@ -416,7 +504,7 @@ const App = () => {
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
-      await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info'), profileInfo);
+      await setDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'info'), cleanData(profileInfo));
       setProfile(profileInfo);
       setAuthMode('pending');
     } catch (err) { setErrorMsg("가입 실패: " + err.message); }
@@ -516,7 +604,7 @@ const App = () => {
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info'), profileInfo);
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info'), cleanData(profileInfo));
       setProfile(profileInfo);
       setAuthMode('pending');
     } catch (err) { 
@@ -604,23 +692,25 @@ const App = () => {
     if (dataToSave.insurances && dataToSave.insurances.length > 0) {
         const first = dataToSave.insurances[0];
         ['insuranceType', 'insuranceCompany', 'claimNumber', 'policyNumber', 'productName', 'coverageName', 'reviewerInfo', 'investigatorInfo', 'coverageDetails'].forEach(field => {
-            dataToSave[field] = first[field];
+            if (first[field] !== undefined) {
+                dataToSave[field] = first[field];
+            }
         });
     }
 
     try {
       if (editingCase?.id) {
-        // 기존 손해사정서 본문은 건드리지 않고 필드만 수정
-        const { reportContent: _, id: __, ...updateFields } = dataToSave;
+        const { reportContent: _, id: __, ...rawFields } = dataToSave;
+        const updateFields = cleanData(rawFields);
         await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', editingCase.id), updateFields);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'cases'), { 
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'cases'), cleanData({ 
           ...dataToSave, 
           createdAt: new Date().toISOString(),
           logs: formData.logs || [],
           diagnoses: formData.diagnoses || [],
           reportContent: null 
-        });
+        }));
       }
       setIsModalOpen(false);
       setEditingCase(null);
@@ -632,7 +722,8 @@ const App = () => {
     if (!user || !selectedCaseForReport) return;
     setIsSavingReport(true);
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', selectedCaseForReport.id), { reportData });
+      const cleanedReportData = cleanData(reportData);
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', selectedCaseForReport.id), { reportData: cleanedReportData });
       setCases(prev => prev.map(c => c.id === selectedCaseForReport.id ? { ...c, reportData } : c));
     } catch (err) { console.error(err); }
     finally { setTimeout(() => setIsSavingReport(false), 500); }
@@ -1455,6 +1546,35 @@ const App = () => {
                       </div>
                     </FormSection>
 
+                    <FormSection title="손해액 산정" icon={Calculator}>
+                      <div className="grid grid-cols-2 gap-6">
+                        {Object.entries(assessmentLabels).map(([key, label]) => (
+                          <div key={key} className="space-y-1">
+                            <div className="flex justify-between items-center px-1">
+                              <label className="text-xs font-bold text-slate-500">{label}</label>
+                              <button onClick={() => setActiveCalcField(key)} className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px] font-bold">
+                                <Calculator size={12}/> 상세계산
+                              </button>
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
+                              <input 
+                                type="text" 
+                                className="w-full pl-8 pr-3 py-2 border rounded-md text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                value={formatComma(reportData.assessment[key])}
+                                onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                        <div className="flex justify-between items-center font-bold text-slate-600 text-sm"><span>손해액 합계</span><span>₩{calcs.subTotal.toLocaleString()}</span></div>
+                        <div className="flex justify-between items-center font-bold text-rose-500 text-sm"><span>과실상계 ({reportData.liability.faultPercent}%)</span><span>- ₩{calcs.faultOffset.toLocaleString()}</span></div>
+                        <div className="flex justify-between items-center font-black text-indigo-600 pt-3 border-t border-slate-200 text-lg"><span>최종 사정금액</span><span>₩{calcs.finalPayment.toLocaleString()}</span></div>
+                      </div>
+                    </FormSection>
+
                     <FormSection title={reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "보험금 지급책임 검토" : "손해배상책임 등 검토"} icon={Shield}>
                       <div className="space-y-4">
                         <InputGroup label={reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "보험금 지급책임 면/부책" : "피보험자 손해배상책임 면/부책"}><input type="text" value={reportData.liability.liabilityStatus} onChange={e => updateReportField('liability.liabilityStatus', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
@@ -1591,7 +1711,7 @@ const App = () => {
                   {/* 데이터 연동 UI */}
                   <div className="flex flex-col md:flex-row gap-4 mb-8 pb-8 border-b border-slate-200">
                     <div className="flex-1 space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase px-1 tracking-widest">연동할 고객 선택</label>
+                      <label className="text-xs font-black text-slate-400 uppercase px-1 tracking-widest">연동할 고객 선택</label>
                       <select 
                         className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                         value={selectedCalcCaseId}
@@ -1613,28 +1733,28 @@ const App = () => {
                     <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">사고 및 피해자 기본 정보</h4>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">사고일시</label><input type="datetime-local" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.accidentDate} onChange={e=>{
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">사고일시</label><input type="datetime-local" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.accidentDate} onChange={e=>{
                       const months = calculateWorkMonths(standaloneCalc.birthDate, e.target.value);
                       const hCoeff = calculateHoffman(months);
                       setStandaloneCalc({...standaloneCalc, accidentDate: e.target.value, workMonths: months, hoffman: hCoeff});
                     }}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">피해자명</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.victimName} onChange={e=>setStandaloneCalc({...standaloneCalc, victimName: e.target.value})}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">생년월일</label><input type="date" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.birthDate} onChange={e=>{
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">피해자명</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.victimName} onChange={e=>setStandaloneCalc({...standaloneCalc, victimName: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">생년월일</label><input type="date" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.birthDate} onChange={e=>{
                       const months = calculateWorkMonths(e.target.value, standaloneCalc.accidentDate);
                       const hCoeff = calculateHoffman(months);
                       setStandaloneCalc({...standaloneCalc, birthDate: e.target.value, workMonths: months, hoffman: hCoeff});
                     }}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">직업</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.occupation} onChange={e=>setStandaloneCalc({...standaloneCalc, occupation: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">직업</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.occupation} onChange={e=>setStandaloneCalc({...standaloneCalc, occupation: e.target.value})}/></div>
                     
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">월 소득 (₩)</label>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">월 소득 (₩)</label>
                       <input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none text-indigo-600" 
                         value={formatComma(standaloneCalc.monthlyIncome)} 
                         onChange={e=>setStandaloneCalc({...standaloneCalc, monthlyIncome: unformatComma(e.target.value)})}
                       />
                     </div>
-                    <div className="space-y-1 md:col-span-2 lg:col-span-3"><label className="text-[10px] font-black text-slate-400 uppercase px-1">상병명</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.diagnosis} onChange={e=>setStandaloneCalc({...standaloneCalc, diagnosis: e.target.value})}/></div>
+                    <div className="space-y-1 md:col-span-2 lg:col-span-3"><label className="text-xs font-black text-slate-400 uppercase px-1">상병명</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.diagnosis} onChange={e=>setStandaloneCalc({...standaloneCalc, diagnosis: e.target.value})}/></div>
                     
-                    <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">입원기간 (시작 ~ 종료)</label>
+                    <div className="space-y-1 md:col-span-2"><label className="text-xs font-black text-slate-400 uppercase px-1">입원기간 (시작 ~ 종료)</label>
                       <div className="flex gap-2 items-center">
                         <input type="date" className="flex-1 bg-white border border-slate-200 px-3 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.hospStartDate} onChange={e=>{
                           const days = getDiffDays(e.target.value, standaloneCalc.hospEndDate);
@@ -1647,12 +1767,12 @@ const App = () => {
                         }}/>
                       </div>
                     </div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">입원 총 일수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none text-indigo-600" value={standaloneCalc.hospDays} onChange={e=>{
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">입원 총 일수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none text-indigo-600" value={standaloneCalc.hospDays} onChange={e=>{
                       const val = Number(e.target.value);
                       setStandaloneCalc({...standaloneCalc, hospDays: val, lostWagesDays: val});
                     }}/></div>
                     
-                    <div className="space-y-1 md:col-span-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">통원기간 (시작 ~ 종료)</label>
+                    <div className="space-y-1 md:col-span-2"><label className="text-xs font-black text-slate-400 uppercase px-1">통원기간 (시작 ~ 종료)</label>
                       <div className="flex gap-2 items-center">
                         <input type="date" className="flex-1 bg-white border border-slate-200 px-3 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.outStartDate} onChange={e=>{
                           const days = getDiffDays(e.target.value, standaloneCalc.outEndDate);
@@ -1665,18 +1785,18 @@ const App = () => {
                         }}/>
                       </div>
                     </div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">통원 총 일수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none text-indigo-600" value={standaloneCalc.outDays} onChange={e=>setStandaloneCalc({...standaloneCalc, outDays: Number(e.target.value)})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">통원 총 일수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none text-indigo-600" value={standaloneCalc.outDays} onChange={e=>setStandaloneCalc({...standaloneCalc, outDays: Number(e.target.value)})}/></div>
                     
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">초진주수 (주)</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.initialWeeks} onChange={e=>setStandaloneCalc({...standaloneCalc, initialWeeks: e.target.value})}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">상해등급</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.injuryGrade} onChange={e=>setStandaloneCalc({...standaloneCalc, injuryGrade: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">초진주수 (주)</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.initialWeeks} onChange={e=>setStandaloneCalc({...standaloneCalc, initialWeeks: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">상해등급</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.injuryGrade} onChange={e=>setStandaloneCalc({...standaloneCalc, injuryGrade: e.target.value})}/></div>
                     
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">장해등급</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.disabilityGrade} onChange={e=>setStandaloneCalc({...standaloneCalc, disabilityGrade: e.target.value})}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">노동능력상실률 (%)</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.lossRate} onChange={e=>setStandaloneCalc({...standaloneCalc, lossRate: e.target.value})}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">취업가능월수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.workMonths} onChange={e=>{
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">장해등급</label><input type="text" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.disabilityGrade} onChange={e=>setStandaloneCalc({...standaloneCalc, disabilityGrade: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">노동능력상실률 (%)</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.lossRate} onChange={e=>setStandaloneCalc({...standaloneCalc, lossRate: e.target.value})}/></div>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">취업가능월수</label><input type="number" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.workMonths} onChange={e=>{
                       const m = Number(e.target.value);
                       setStandaloneCalc({...standaloneCalc, workMonths: m, hoffman: calculateHoffman(m)});
                     }}/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase px-1">호프만계수</label>
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">호프만계수</label>
                       <input type="number" step="0.0001" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" 
                         value={standaloneCalc.hoffman} 
                         onChange={e=>setStandaloneCalc({...standaloneCalc, hoffman: e.target.value})}
@@ -1685,75 +1805,240 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                  <div className="space-y-6">
+                <div className="space-y-10">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                     {Object.entries(assessmentLabels).map(([key, label]) => (
                       <div key={key} className="space-y-2">
                         <div className="flex justify-between items-end px-2">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
-                          {key === 'lostWages' && (
-                            <div className="flex items-center gap-3 mb-1">
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-black text-slate-400 uppercase tracking-widest">{label}</label>
+                            {key === 'lostWages' && (
                               <div className="flex items-center gap-1">
-                                <span className="text-[9px] font-bold text-slate-400">휴업일수:</span>
-                                <input 
-                                  type="number" 
-                                  className="w-12 bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-[10px] font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500"
-                                  value={standaloneCalc.lostWagesDays}
-                                  onChange={e => setStandaloneCalc({...standaloneCalc, lostWagesDays: Number(e.target.value)})}
-                                />
+                                <button 
+                                  onClick={() => {
+                                    const isTurningOn = !standaloneCalc.isLostWagesManual;
+                                    setStandaloneCalc(prev => ({
+                                      ...prev, 
+                                      isLostWagesManual: isTurningOn,
+                                      ...(isTurningOn ? { 
+                                        lostWagesPeriods: prev.lostWagesPeriods?.length > 0 ? prev.lostWagesPeriods : [{ income: prev.monthlyIncome, days: prev.lostWagesDays, multiplier: prev.lostWagesMultiplier || 0.85 }] 
+                                      } : {})
+                                    }));
+                                  }}
+                                  className={`text-[8px] font-black px-2 py-0.5 rounded-md transition-all ${standaloneCalc.isLostWagesManual ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200 text-slate-500'}`}
+                                >
+                                  {standaloneCalc.isLostWagesManual ? '수동 입력 중' : '자동 계산 중'}
+                                </button>
+                                {!standaloneCalc.isLostWagesManual && (
+                                  <button 
+                                    onClick={() => setStandaloneCalc(prev => ({
+                                      ...prev,
+                                      isLostWagesManual: true,
+                                      lostWagesPeriods: [
+                                        { income: prev.monthlyIncome, days: prev.lostWagesDays, multiplier: prev.lostWagesMultiplier || 0.85 },
+                                        { income: prev.monthlyIncome, days: 0, multiplier: 0.85 }
+                                      ]
+                                    }))}
+                                    className="text-[8px] font-black px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all flex items-center gap-1"
+                                  >
+                                    <Plus size={10}/> 기간 추가
+                                  </button>
+                                )}
                               </div>
+                            )}
+                            {key === 'lostEarnings' && (
                               <div className="flex items-center gap-1">
-                                <span className="text-[9px] font-bold text-slate-400">계수:</span>
-                              <input 
-                                type="number" 
-                                step="0.01"
-                                className="w-14 bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-[10px] font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500"
-                                value={standaloneCalc.lostWagesMultiplier}
-                                onChange={e => setStandaloneCalc({...standaloneCalc, lostWagesMultiplier: e.target.value})}
-                              />
+                                <button 
+                                  onClick={() => {
+                                    const isTurningOn = !standaloneCalc.isLostEarningsManual;
+                                    setStandaloneCalc(prev => ({
+                                      ...prev, 
+                                      isLostEarningsManual: isTurningOn,
+                                      ...(isTurningOn ? { 
+                                        lostEarningsPeriods: prev.lostEarningsPeriods?.length > 0 ? prev.lostEarningsPeriods : [{ income: prev.monthlyIncome, rate: prev.lossRate, hoffman: prev.hoffman }] 
+                                      } : {})
+                                    }));
+                                  }}
+                                  className={`text-[8px] font-black px-2 py-0.5 rounded-md transition-all ${standaloneCalc.isLostEarningsManual ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200 text-slate-500'}`}
+                                >
+                                  {standaloneCalc.isLostEarningsManual ? '수동 입력 중' : '자동 계산 중'}
+                                </button>
+                                {!standaloneCalc.isLostEarningsManual && (
+                                  <button 
+                                    onClick={() => setStandaloneCalc(prev => ({
+                                      ...prev,
+                                      isLostEarningsManual: true,
+                                      lostEarningsPeriods: [
+                                        { income: prev.monthlyIncome, rate: prev.lossRate, hoffman: prev.hoffman },
+                                        { income: prev.monthlyIncome, rate: 0, hoffman: 0 }
+                                      ]
+                                    }))}
+                                    className="text-[8px] font-black px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all flex items-center gap-1"
+                                  >
+                                    <Plus size={10}/> 기간 추가
+                                  </button>
+                                )}
                               </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
+                        {key === 'lostWages' && (
+                          <div className="mt-2 space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            {!standaloneCalc.isLostWagesManual ? (
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">월 소득액</label>
+                                  <input type="text" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={formatComma(standaloneCalc.monthlyIncome)} onChange={e => setStandaloneCalc({...standaloneCalc, monthlyIncome: unformatComma(e.target.value)})} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">휴업일수</label>
+                                  <input type="number" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={standaloneCalc.lostWagesDays} onChange={e => setStandaloneCalc({...standaloneCalc, lostWagesDays: Number(e.target.value)})} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">계수 (예: 0.85)</label>
+                                  <input type="number" step="0.01" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={standaloneCalc.lostWagesMultiplier} onChange={e => setStandaloneCalc({...standaloneCalc, lostWagesMultiplier: e.target.value})} />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {(standaloneCalc.lostWagesPeriods || []).map((period, pIdx) => (
+                                  <div key={pIdx} className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-indigo-100 shadow-sm animate-in slide-in-from-left-2 group/item">
+                                    <span className="text-[10px] font-black text-indigo-400 w-4">#{pIdx + 1}</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] font-bold text-indigo-500">월소득:</span>
+                                      <input type="text" className="w-20 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={formatComma(period.income)} onChange={e => {
+                                        const newPeriods = [...standaloneCalc.lostWagesPeriods];
+                                        newPeriods[pIdx].income = unformatComma(e.target.value);
+                                        setStandaloneCalc({...standaloneCalc, lostWagesPeriods: newPeriods});
+                                      }} />
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] font-bold text-indigo-500">일수:</span>
+                                      <input type="number" className="w-12 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={period.days} onChange={e => {
+                                        const newPeriods = [...standaloneCalc.lostWagesPeriods];
+                                        newPeriods[pIdx].days = Number(e.target.value);
+                                        setStandaloneCalc({...standaloneCalc, lostWagesPeriods: newPeriods});
+                                      }} />
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] font-bold text-indigo-500">계수:</span>
+                                      <input type="number" step="0.01" className="w-12 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={period.multiplier} onChange={e => {
+                                        const newPeriods = [...standaloneCalc.lostWagesPeriods];
+                                        newPeriods[pIdx].multiplier = e.target.value;
+                                        setStandaloneCalc({...standaloneCalc, lostWagesPeriods: newPeriods});
+                                      }} />
+                                    </div>
+                                    <button onClick={() => setStandaloneCalc(prev => ({...prev, lostWagesPeriods: prev.lostWagesPeriods.filter((_, i) => i !== pIdx)}))} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                                  </div>
+                                ))}
+                                <button onClick={() => setStandaloneCalc(prev => ({...prev, lostWagesPeriods: [...(prev.lostWagesPeriods || []), { income: prev.monthlyIncome, days: 0, multiplier: 0.85 }]}))} className="w-full py-2.5 border-2 border-dashed border-indigo-200 rounded-xl text-[10px] font-black text-indigo-500 hover:bg-indigo-50 hover:border-indigo-400 transition-all flex items-center justify-center gap-2 shadow-sm"><Plus size={14}/> 휴업 기간 추가 (입원/통원 구분 등)</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {key === 'lostEarnings' && (
+                          <div className="mt-2 space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            {!standaloneCalc.isLostEarningsManual ? (
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">월 소득액</label>
+                                  <input type="text" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={formatComma(standaloneCalc.monthlyIncome)} onChange={e => setStandaloneCalc({...standaloneCalc, monthlyIncome: unformatComma(e.target.value)})} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">장해율 (%)</label>
+                                  <input type="number" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={standaloneCalc.lossRate} onChange={e => setStandaloneCalc({...standaloneCalc, lossRate: e.target.value})} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-slate-400">호프만 계수</label>
+                                  <input type="number" step="0.0001" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none" value={standaloneCalc.hoffman} onChange={e => setStandaloneCalc({...standaloneCalc, hoffman: e.target.value})} />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                              {(standaloneCalc.lostEarningsPeriods || []).map((period, pIdx) => (
+                                <div key={pIdx} className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-indigo-100 shadow-sm animate-in slide-in-from-left-2 group/item">
+                                <span className="text-[10px] font-black text-indigo-400 w-4">#{pIdx + 1}</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] font-bold text-indigo-500">월소득:</span>
+                                  <input type="text" className="w-20 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={formatComma(period.income)} onChange={e => {
+                                    const newPeriods = [...standaloneCalc.lostEarningsPeriods];
+                                    newPeriods[pIdx].income = unformatComma(e.target.value);
+                                    setStandaloneCalc({...standaloneCalc, lostEarningsPeriods: newPeriods});
+                                  }} />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] font-bold text-indigo-500">상실률(%):</span>
+                                  <input type="number" className="w-12 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={period.rate} onChange={e => {
+                                    const newPeriods = [...standaloneCalc.lostEarningsPeriods];
+                                    newPeriods[pIdx].rate = e.target.value;
+                                    setStandaloneCalc({...standaloneCalc, lostEarningsPeriods: newPeriods});
+                                  }} />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] font-bold text-indigo-500">호프만:</span>
+                                  <input type="number" step="0.0001" className="w-16 bg-white border border-indigo-100 rounded-lg px-2 py-0.5 text-xs font-black text-indigo-600 outline-none" value={period.hoffman} onChange={e => {
+                                    const newPeriods = [...standaloneCalc.lostEarningsPeriods];
+                                    newPeriods[pIdx].hoffman = e.target.value;
+                                    setStandaloneCalc({...standaloneCalc, lostEarningsPeriods: newPeriods});
+                                  }} />
+                                </div>
+                                <button onClick={() => setStandaloneCalc(prev => ({...prev, lostEarningsPeriods: prev.lostEarningsPeriods.filter((_, i) => i !== pIdx)}))} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                              </div>
+                            ))}
+                            <button onClick={() => setStandaloneCalc(prev => ({...prev, lostEarningsPeriods: [...(prev.lostEarningsPeriods || []), { income: prev.monthlyIncome, rate: prev.lossRate, hoffman: 0 }]}))} className="w-full py-2.5 border-2 border-dashed border-indigo-200 rounded-xl text-[10px] font-black text-indigo-500 hover:bg-indigo-50 hover:border-indigo-400 transition-all flex items-center justify-center gap-2 shadow-sm"><Plus size={14}/> 상실 수익 기간 추가 (한시장해/영구장해 등)</button>
+                          </div>
+                            )}
+                          </div>
+                        )}
                         <div className="relative">
                           <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 font-bold">₩</span>
                           <input 
                             type="text" 
-                            className={`w-full pl-10 pr-5 py-4 border border-slate-100 rounded-2xl font-mono font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${key === 'lostWages' || key === 'lostEarnings' ? 'bg-indigo-50/30' : 'bg-slate-50'}`}
+                            readOnly={key === 'lostWages' || key === 'lostEarnings' || (key === 'alimony' && Number(standaloneCalc.lossRate) < 50)}
+                            className={`w-full pl-10 pr-5 py-4 border border-slate-100 rounded-2xl font-mono font-black text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${key === 'lostWages' || key === 'lostEarnings' || (key === 'alimony' && Number(standaloneCalc.lossRate) < 50) ? 'bg-slate-100/50 cursor-default' : 'bg-slate-50'}`}
                             value={formatComma(standaloneCalc[key])}
                             onChange={e => setStandaloneCalc({...standaloneCalc, [key]: unformatComma(e.target.value)})}
                           />
                         </div>
                       </div>
                     ))}
-                    <div className="space-y-2 pt-4 border-t border-slate-50">
-                      <label className="text-[10px] font-black text-amber-500 uppercase px-2 tracking-widest">피해자 과실비율 (%)</label>
+                  </div>
+
+                  <div className="space-y-8">
+                    <div className="space-y-2 pt-6 border-t border-slate-100">
+                      <label className="text-xs font-black text-amber-500 uppercase px-2 tracking-widest">피해자 과실비율 (%)</label>
                       <input 
                         type="number" 
-                        className="w-full px-5 py-4 bg-amber-50/30 border border-amber-100 rounded-2xl font-mono font-black text-amber-600 outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+                        className="w-full max-w-xs px-5 py-4 bg-amber-50/30 border border-amber-100 rounded-2xl font-mono font-black text-xs text-amber-600 outline-none focus:ring-2 focus:ring-amber-500 transition-all"
                         value={standaloneCalc.faultPercent}
                         onChange={e => setStandaloneCalc({...standaloneCalc, faultPercent: Number(e.target.value)})}
                       />
                     </div>
-                  </div>
 
-                  <div className="flex flex-col">
-                    <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-2xl sticky top-0">
-                      <h4 className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em] mb-8">Calculation Result</h4>
-                      <div className="space-y-6">
-                        <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-400">손해액 합계</span><span className="text-xl font-black">₩{standaloneResult.subTotal.toLocaleString()}</span></div>
-                        <div className="flex justify-between items-center text-amber-400"><span className="text-sm font-bold">과실상계 ({standaloneCalc.faultPercent}%)</span><span className="text-xl font-black">- ₩{standaloneResult.faultOffset.toLocaleString()}</span></div>
-                        <div className="pt-8 border-t border-slate-800 mt-4"><p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-2">최종 예상 배상금</p><div className="text-4xl font-black text-indigo-400 tracking-tighter italic">₩{standaloneResult.finalPayment.toLocaleString()}</div></div>
+                    <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl">
+                      <h4 className="text-indigo-400 text-xs font-black uppercase tracking-[0.2em] mb-8">Calculation Result</h4>
+                      <div className="flex flex-col md:flex-row justify-between items-end gap-10">
+                        <div className="space-y-6 flex-1 w-full">
+                          <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-400">손해액 합계</span><span className="text-xl font-black">₩{standaloneResult.subTotal.toLocaleString()}</span></div>
+                          <div className="flex justify-between items-center text-amber-400"><span className="text-sm font-bold">과실상계 ({standaloneCalc.faultPercent}%)</span><span className="text-xl font-black">- ₩{standaloneResult.faultOffset.toLocaleString()}</span></div>
+                        </div>
+                        <div className="flex-1 w-full pt-8 md:pt-0 border-t md:border-t-0 md:border-l border-slate-800 md:pl-10 flex flex-col md:flex-row justify-between items-end gap-6">
+                          <div>
+                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-2">최종 예상 배상금</p>
+                            <div className="text-5xl font-black text-indigo-400 tracking-tighter italic">₩{standaloneResult.finalPayment.toLocaleString()}</div>
+                          </div>
+                          <button onClick={() => { setStandaloneCalc({ 
+                            medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0, faultPercent: 0,
+                            hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
+                            accidentDate: '', victimName: '', birthDate: '', occupation: '', monthlyIncome: 0,
+                            diagnosis: '', hospDays: 0, outDays: 0, initialWeeks: 0,
+                            injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
+                            lostWagesMultiplier: 0.85,
+                            lostWagesDays: 0
+                          }); setSelectedCalcCaseId(''); }} className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Reset Calculator</button>
+                        </div>
                       </div>
-                      <button onClick={() => { setStandaloneCalc({ 
-                        medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0, faultPercent: 0,
-                        hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
-                        accidentDate: '', victimName: '', birthDate: '', occupation: '', monthlyIncome: 0,
-                        diagnosis: '', hospDays: 0, outDays: 0, initialWeeks: 0,
-                        injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
-                        lostWagesMultiplier: 0.85,
-                        lostWagesDays: 0
-                      }); setSelectedCalcCaseId(''); }} className="w-full mt-10 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Reset Calculator</button>
                     </div>
                   </div>
                 </div>
@@ -1835,10 +2120,10 @@ const App = () => {
                   <p className="text-lg font-bold">손해사정사 {profile?.name || '담당자'} (인)</p>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      </main>
+           </div> 
+        )}
+      </div>
+    </main>
 
       {/* 사건 정보 마스터 모달 (이미지 기반 완벽 복구) */}
       {isModalOpen && (
