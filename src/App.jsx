@@ -916,7 +916,7 @@ const App = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `손사Pro_전체백업_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `E-UM_NEXUS_전체백업_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1014,7 +1014,7 @@ const App = () => {
           <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600"></div>
           <div className="flex flex-col items-center mb-10 text-center">
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-indigo-400 mb-4 shadow-xl"><ShieldCheck size={32}/></div>
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight italic underline decoration-indigo-500 decoration-4 underline-offset-4">손사Pro</h1>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight italic underline decoration-indigo-500 decoration-4 underline-offset-4">E-UM NEXUS</h1>
           </div>
           
           {authMode === 'login' && (
@@ -1134,7 +1134,7 @@ const App = () => {
       {/* Sidebar */}
       <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 print:hidden transition-all duration-500">
         <div className="p-8 flex-1 overflow-y-auto custom-scrollbar">
-          <div className="flex items-center gap-3 mb-12"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg"><ShieldCheck size={24}/></div><div><span className="text-xl font-black block tracking-tighter italic">손사Pro</span><span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Master Edition</span></div></div>
+          <div className="flex items-center gap-3 mb-12"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg"><ShieldCheck size={24}/></div><div><span className="text-xl font-black block tracking-tighter italic">E-UM NEXUS</span><span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Master Edition</span></div></div>
           <nav className="space-y-3">
             <button onClick={()=>setView('dashboard')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='dashboard'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><LayoutDashboard size={20}/> 대시보드</button>
             <button onClick={()=>setView('list')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='list'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileText size={20}/> 사건 관리대장</button>
