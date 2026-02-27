@@ -205,7 +205,7 @@ const App = () => {
       liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: ""
     },
     assessment: {
-      medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0
+      medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0
     },
     assessmentDetails: {}, // 상세 산출 내역 저장
     processLogs: [],
@@ -214,7 +214,7 @@ const App = () => {
   });
 
   const [standaloneCalc, setStandaloneCalc] = useState({
-    medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0, faultPercent: 0,
+    medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0, roundingDeduction: 0, faultPercent: 0,
     hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
     accidentDate: '', victimName: '', birthDate: '', occupation: '', monthlyIncome: 0,
     diagnosis: '', hospDays: 0, outDays: 0, initialWeeks: 0,
@@ -228,7 +228,11 @@ const App = () => {
     isLostWagesManual: false,
     isLostEarningsManual: false,
     lostWagesPeriods: [{ income: 0, days: 0, multiplier: 0.85 }],
-    lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }]
+    lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }],
+    nursingDays: 0,
+    nursingDailyWage: 0,
+    transportationDays: 0,
+    transportationDailyRate: 8000
   });
   const [selectedCalcCaseId, setSelectedCalcCaseId] = useState('');
 
@@ -270,11 +274,19 @@ const App = () => {
         isLostWagesManual: data.isLostWagesManual || false,
         isLostEarningsManual: data.isLostEarningsManual || false,
         lostWagesPeriods: data.lostWagesPeriods || [{ income: data.lostWagesIncome || data.monthlyIncome || 0, days: data.lostWagesDays || 0, multiplier: data.lostWagesMultiplier || 0.85 }],
-        lostEarningsPeriods: data.lostEarningsPeriods || [{ income: data.lostEarningsIncome || data.monthlyIncome || 0, rate: data.lostEarningsRate || data.lossRate || 0, hoffman: data.lostEarningsHoffman || data.hoffman || 0 }]
+        lostEarningsPeriods: data.lostEarningsPeriods || [{ income: data.lostEarningsIncome || data.monthlyIncome || 0, rate: data.lostEarningsRate || data.lossRate || 0, hoffman: data.lostEarningsHoffman || data.hoffman || 0 }],
+        nursingDailyWage: data.nursingDailyWage || 0,
+        nursingExpenses: data.nursingExpenses || 0,
+        nursingDays: data.nursingDays || 0,
+        transportationExpenses: data.transportationExpenses || 0,
+        transportationDays: data.transportationDays !== undefined ? data.transportationDays : (data.outDays || 0),
+        transportationDailyRate: data.transportationDailyRate || 8000,
+        otherDamages: data.otherDamages || 0,
+        roundingDeduction: data.roundingDeduction || 0
       });
     } else {
       setStandaloneCalc({
-        medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0, faultPercent: 0,
+        medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0, roundingDeduction: 0, faultPercent: 0,
         hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
         accidentDate: targetCase.incidentDiagnosisDate || targetCase.receptionDate || '',
         victimName: targetCase.clientName || '',
@@ -291,10 +303,35 @@ const App = () => {
         isLostWagesManual: false,
         isLostEarningsManual: false,
         lostWagesPeriods: [{ income: 0, days: 0, multiplier: 0.85 }],
-        lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }]
+        lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }],
+        nursingDays: 0,
+        nursingDailyWage: 0,
+        transportationExpenses: 0,
+        transportationDays: targetCase.outDays || 0,
+        transportationDailyRate: 8000
       });
     }
   };
+
+  // 상해급수 변경 시 간병일수 자동 세팅 (기준값)
+  useEffect(() => {
+    const gradeNum = parseInt(standaloneCalc.injuryGrade?.toString().replace(/[^0-9]/g, ""));
+    if (!isNaN(gradeNum)) {
+      let days = 0;
+      if (gradeNum >= 1 && gradeNum <= 2) days = 60;
+      else if (gradeNum >= 3 && gradeNum <= 4) days = 30;
+      else if (gradeNum === 5) days = 15;
+      
+      if (days > 0) {
+        setStandaloneCalc(prev => ({ ...prev, nursingDays: days }));
+      }
+    }
+  }, [standaloneCalc.injuryGrade]);
+
+  // 통원일수 변경 시 교통비 일수 자동 세팅
+  useEffect(() => {
+    setStandaloneCalc(prev => ({ ...prev, transportationDays: prev.outDays }));
+  }, [standaloneCalc.outDays]);
 
   // --- 손해배상금 자동 계산 통합 로직 ---
   useEffect(() => {
@@ -321,6 +358,15 @@ const App = () => {
       const hoffman = Number(standaloneCalc.hoffman) || 0;
       lostEarnings = Math.floor(income * (rate / 100) * hoffman);
     }
+
+    // 간병비 계산 (수동 입력 임금 우선, 없으면 월소득/25)
+    const dailyRate = standaloneCalc.nursingDailyWage > 0 ? standaloneCalc.nursingDailyWage : Math.floor((Number(standaloneCalc.monthlyIncome) || 0) / 25);
+    const nursingExpenses = (Number(standaloneCalc.nursingDays) || 0) * dailyRate;
+
+    // 교통비 계산 (단가 * 일수)
+    const transDays = Number(standaloneCalc.transportationDays) || 0;
+    const transRate = Number(standaloneCalc.transportationDailyRate) || 8000;
+    const transportationExpenses = transDays * transRate;
 
     // 위자료 자동 계산 (부상 vs 후유장해 중 높은 금액)
     const gradeNum = parseInt(standaloneCalc.injuryGrade?.toString().replace(/[^0-9]/g, ""));
@@ -352,33 +398,36 @@ const App = () => {
       calculatedAlimony = Math.max(injuryAlimony, disabilityAlimony);
     }
     
-    if (standaloneCalc.lostWages !== lostWages || standaloneCalc.lostEarnings !== lostEarnings || (isAutoAlimony && standaloneCalc.alimony !== calculatedAlimony)) {
+    if (standaloneCalc.lostWages !== lostWages || standaloneCalc.lostEarnings !== lostEarnings || standaloneCalc.nursingExpenses !== nursingExpenses || standaloneCalc.transportationExpenses !== transportationExpenses) {
       setStandaloneCalc(prev => ({ 
         ...prev, 
         lostWages, 
         lostEarnings, 
-        ...(isAutoAlimony ? { alimony: calculatedAlimony } : {}) 
+        nursingExpenses,
+        transportationExpenses
       }));
     }
   }, [
     standaloneCalc.monthlyIncome, standaloneCalc.lostWagesDays, standaloneCalc.lostWagesMultiplier, 
     standaloneCalc.isLostWagesManual, standaloneCalc.lostWagesPeriods,
     standaloneCalc.lossRate, standaloneCalc.hoffman, standaloneCalc.isLostEarningsManual, standaloneCalc.lostEarningsPeriods,
-    standaloneCalc.injuryGrade
+    standaloneCalc.injuryGrade,
+    standaloneCalc.nursingDays, standaloneCalc.nursingDailyWage,
+    standaloneCalc.transportationDays, standaloneCalc.transportationDailyRate
   ]);
 
   const standaloneResult = useMemo(() => {
-    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, otherDamages, alimony, faultPercent } = standaloneCalc;
-    const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(otherDamages)||0) + (Number(alimony)||0);
+    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, nursingExpenses, transportationExpenses, alimony, otherDamages, roundingDeduction, faultPercent } = standaloneCalc;
+    const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(nursingExpenses)||0) + (Number(transportationExpenses)||0) + (Number(alimony)||0) + (Number(otherDamages)||0);
     const faultOffset = Math.floor(subTotal * ((Number(faultPercent)||0) / 100));
-    const finalPayment = subTotal - faultOffset;
+    const finalPayment = subTotal - faultOffset - (Number(roundingDeduction)||0);
     return { subTotal, faultOffset, finalPayment };
   }, [standaloneCalc]);
 
   // --- 리포트 자동 계산 ---
   const calcs = useMemo(() => {
-    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, otherDamages, alimony } = reportData.assessment;
-    const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(otherDamages)||0) + (Number(alimony)||0);
+    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, nursingExpenses, transportationExpenses, alimony, otherDamages } = reportData.assessment;
+    const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(nursingExpenses)||0) + (Number(transportationExpenses)||0) + (Number(alimony)||0) + (Number(otherDamages)||0);
     // 장기/실손 보험은 과실상계 미적용
     const fault = (reportData.reportType === 'longTerm' || reportData.reportType === 'medical') ? 0 : (Number(reportData.liability.faultPercent) || 0);
     const faultOffset = Math.floor(subTotal * (fault / 100));
@@ -843,7 +892,7 @@ const App = () => {
           liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: ""
         },
         assessment: {
-          medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0
+            medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0
         },
         assessmentDetails: {},
         processLogs: [],
@@ -872,7 +921,7 @@ const App = () => {
         accident: { overview: "", time: "", place: "", cause: "", details: "", investigationDetails: "" },
         damage: { hospital: "", diagnosis: "", treatment: "" },
         liability: { liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: "" },
-        assessment: { medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0 },
+          assessment: { medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0 },
         assessmentDetails: {},
         processLogs: [], fees: { basic: 0, mileage: 0, fuelPrice: 0, efficiency: 0, toll: 0, misc: 0, daily: 0 },
         bankInfo: { accountHolder: "", birthDate: "", bankName: "", accountNumber: "" }
@@ -988,8 +1037,10 @@ const App = () => {
     futureMedicalExpenses: '향후치료비',
     lostWages: '휴업손해액',
     lostEarnings: '상실수익액',
-    otherDamages: '기타',
-    alimony: '위자료'
+    nursingExpenses: '간병비',
+    transportationExpenses: '교통비',
+    alimony: '위자료',
+    otherDamages: '기타'
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-900 text-white font-black animate-pulse">SYSTEM LOADING...</div>;
@@ -1812,6 +1863,9 @@ const App = () => {
                         <div className="flex justify-between items-end px-2">
                           <div className="flex items-center gap-2">
                             <label className="text-xs font-black text-slate-400 uppercase tracking-widest">{label}</label>
+                            {key === 'nursingExpenses' && (
+                              <span className="text-[8px] font-black px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600">기준 일수 및 임금 수정 가능</span>
+                            )}
                             {key === 'lostWages' && (
                               <div className="flex items-center gap-1">
                                 <button 
@@ -1882,6 +1936,36 @@ const App = () => {
                             )}
                           </div>
                         </div>
+                        {key === 'nursingExpenses' && (
+                          <div className="mt-2 space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400">간병일수 (일)</label>
+                                <input type="number" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" value={standaloneCalc.nursingDays} onChange={e => setStandaloneCalc({...standaloneCalc, nursingDays: Number(e.target.value)})} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400">적용 일당 (미입력 시 월소득/30)</label>
+                                <input type="text" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" placeholder={formatComma(Math.floor(standaloneCalc.monthlyIncome / 25))} value={formatComma(standaloneCalc.nursingDailyWage)} onChange={e => setStandaloneCalc({...standaloneCalc, nursingDailyWage: unformatComma(e.target.value)})} />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {key === 'transportationExpenses' && (
+                          <div className="mt-2 space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400">통원일수 (일)</label>
+                                <input type="number" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" value={standaloneCalc.transportationDays} onChange={e => setStandaloneCalc({...standaloneCalc, transportationDays: Number(e.target.value)})} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-bold text-slate-400">교통비 단가 (원)</label>
+                                <input type="text" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" value={formatComma(standaloneCalc.transportationDailyRate)} onChange={e => setStandaloneCalc({...standaloneCalc, transportationDailyRate: unformatComma(e.target.value)})} />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         {key === 'lostWages' && (
                           <div className="mt-2 space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             {!standaloneCalc.isLostWagesManual ? (
@@ -1995,8 +2079,8 @@ const App = () => {
                           <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 font-bold">₩</span>
                           <input 
                             type="text" 
-                            readOnly={key === 'lostWages' || key === 'lostEarnings' || (key === 'alimony' && Number(standaloneCalc.lossRate) < 50)}
-                            className={`w-full pl-10 pr-5 py-4 border border-slate-100 rounded-2xl font-mono font-black text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${key === 'lostWages' || key === 'lostEarnings' || (key === 'alimony' && Number(standaloneCalc.lossRate) < 50) ? 'bg-slate-100/50 cursor-default' : 'bg-slate-50'}`}
+                            readOnly={['lostWages', 'lostEarnings', 'nursingExpenses', 'transportationExpenses'].includes(key)}
+                            className={`w-full pl-10 pr-5 py-4 border border-slate-100 rounded-2xl font-mono font-black text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${['lostWages', 'lostEarnings', 'nursingExpenses', 'transportationExpenses'].includes(key) ? 'bg-slate-100/50 cursor-default' : 'bg-slate-50'}`}
                             value={formatComma(standaloneCalc[key])}
                             onChange={e => setStandaloneCalc({...standaloneCalc, [key]: unformatComma(e.target.value)})}
                           />
@@ -2006,14 +2090,25 @@ const App = () => {
                   </div>
 
                   <div className="space-y-8">
-                    <div className="space-y-2 pt-6 border-t border-slate-100">
-                      <label className="text-xs font-black text-amber-500 uppercase px-2 tracking-widest">피해자 과실비율 (%)</label>
-                      <input 
-                        type="number" 
-                        className="w-full max-w-xs px-5 py-4 bg-amber-50/30 border border-amber-100 rounded-2xl font-mono font-black text-xs text-amber-600 outline-none focus:ring-2 focus:ring-amber-500 transition-all"
-                        value={standaloneCalc.faultPercent}
-                        onChange={e => setStandaloneCalc({...standaloneCalc, faultPercent: Number(e.target.value)})}
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t border-slate-100">
+                      <div className="space-y-2">
+                        <label className="text-xs font-black text-amber-500 uppercase px-2 tracking-widest">피해자 과실비율 (%)</label>
+                        <input 
+                          type="number" 
+                          className="w-full px-5 py-4 bg-amber-50/30 border border-amber-100 rounded-2xl font-mono font-black text-xs text-amber-600 outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+                          value={standaloneCalc.faultPercent}
+                          onChange={e => setStandaloneCalc({...standaloneCalc, faultPercent: Number(e.target.value)})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-black text-rose-500 uppercase px-2 tracking-widest">절사 금액 (-)</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-5 py-4 bg-rose-50/30 border border-rose-100 rounded-2xl font-mono font-black text-xs text-rose-600 outline-none focus:ring-2 focus:ring-rose-500 transition-all"
+                          value={formatComma(standaloneCalc.roundingDeduction)}
+                          onChange={e => setStandaloneCalc({...standaloneCalc, roundingDeduction: unformatComma(e.target.value)})}
+                        />
+                      </div>
                     </div>
 
                     <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl">
@@ -2029,13 +2124,15 @@ const App = () => {
                             <div className="text-5xl font-black text-indigo-400 tracking-tighter italic">₩{standaloneResult.finalPayment.toLocaleString()}</div>
                           </div>
                           <button onClick={() => { setStandaloneCalc({ 
-                            medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, otherDamages: 0, alimony: 0, faultPercent: 0,
+                            medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0, roundingDeduction: 0, faultPercent: 0,
                             hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
                             accidentDate: '', victimName: '', birthDate: '', occupation: '', monthlyIncome: 0,
                             diagnosis: '', hospDays: 0, outDays: 0, initialWeeks: 0,
                             injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
                             lostWagesMultiplier: 0.85,
-                            lostWagesDays: 0
+                            lostWagesDays: 0,
+                            transportationDays: 0,
+                            transportationDailyRate: 8000
                           }); setSelectedCalcCaseId(''); }} className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Reset Calculator</button>
                         </div>
                       </div>
@@ -2090,7 +2187,9 @@ const App = () => {
                           <td className="border border-slate-400 p-2 font-bold">{label}</td>
                           <td className="border border-slate-400 p-2 text-xs text-slate-600">
                             {key === 'lostWages' ? `(₩${formatComma(standaloneCalc.monthlyIncome)} / 30일) * ${standaloneCalc.lostWagesDays}일 * ${standaloneCalc.lostWagesMultiplier}` : 
-                             key === 'lostEarnings' ? `(₩${formatComma(standaloneCalc.monthlyIncome)} * ${standaloneCalc.lossRate}% * ${standaloneCalc.hoffman})` : '-'}
+                             key === 'lostEarnings' ? `(₩${formatComma(standaloneCalc.monthlyIncome)} * ${standaloneCalc.lossRate}% * ${standaloneCalc.hoffman})` : 
+                             key === 'nursingExpenses' ? `${standaloneCalc.nursingDays}일 (상해 ${parseInt(standaloneCalc.injuryGrade?.toString().replace(/[^0-9]/g, ""))}급)` : 
+                             key === 'transportationExpenses' ? `₩${formatComma(standaloneCalc.transportationDailyRate)} * ${standaloneCalc.transportationDays}일` : '-'}
                           </td>
                           <td className="border border-slate-400 p-2 text-right">₩{formatComma(standaloneCalc[key])}</td>
                         </tr>
@@ -2105,6 +2204,11 @@ const App = () => {
                           ₩{formatComma(standaloneResult.subTotal)} * {standaloneCalc.faultPercent}%
                         </td>
                         <td className="border border-slate-400 p-2 text-right">- ₩{formatComma(standaloneResult.faultOffset)}</td>
+                      </tr>
+                      <tr className="text-rose-600">
+                        <td className="border border-slate-400 p-2 font-bold">절사 금액</td>
+                        <td className="border border-slate-400 p-2 text-xs">-</td>
+                        <td className="border border-slate-400 p-2 text-right">- ₩{formatComma(standaloneCalc.roundingDeduction)}</td>
                       </tr>
                       <tr className="bg-slate-900 text-white font-black text-lg">
                         <td className="p-3" colSpan="2">최종 예상 배상금</td>
