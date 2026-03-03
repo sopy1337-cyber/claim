@@ -132,6 +132,73 @@ const FormSection = ({ title, icon: Icon, children }) => (
   </div>
 );
 
+const RichTextEditor = ({ value, onChange, className = "" }) => {
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== (value || "")) {
+      editorRef.current.innerHTML = value || "";
+    }
+  }, [value]);
+
+  const handleInput = () => {
+    onChange(editorRef.current.innerHTML);
+  };
+
+  const exec = (command, arg) => {
+    document.execCommand('styleWithCSS', null, true);
+    if (command === 'fontSize') {
+      document.execCommand('fontSize', false, '7');
+      // 브라우저별로 다르게 생성되는 마커들을 모두 찾음
+      const fontEls = document.querySelectorAll('font[size="7"], font[size="+4"], span[style*="font-size: xxx-large"], span[style*="font-size: 48px"], span[style*="font-size: 36pt"]');
+      fontEls.forEach(el => {
+        el.removeAttribute('size');
+        el.style.fontSize = arg;
+      });
+    } else {
+      document.execCommand(command, false, arg);
+    }
+    handleInput();
+  };
+
+  return (
+    <div className="border rounded-md overflow-hidden bg-white">
+      <div className="bg-slate-50 p-1 border-b flex items-center gap-1 flex-wrap">
+        <select 
+          onMouseDown={e => e.preventDefault()}
+          onChange={(e) => { 
+            let val = e.target.value;
+            if (val === 'custom') {
+              const customSize = window.prompt("글자 크기를 입력하세요 (숫자만 입력 시 pt로 적용됩니다)", "11");
+              if (customSize) val = isNaN(customSize) ? customSize : customSize + 'pt';
+              else { e.target.value = ""; return; }
+            }
+            exec('fontSize', val); 
+            e.target.value = ""; 
+          }}
+          className="text-[10px] font-bold p-1 rounded border bg-white outline-none w-20"
+          value=""
+        >
+          <option value="" disabled>크기(pt)</option>
+          <option value="custom">직접 입력</option>
+          {['9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '24pt'].map(s => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <div className="h-4 w-[1px] bg-slate-300 mx-1" />
+        <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => exec('bold')} className="p-1 hover:bg-slate-200 rounded text-xs font-bold w-6 h-6">B</button>
+        <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => exec('underline')} className="p-1 hover:bg-slate-200 rounded text-xs underline w-6 h-6">U</button>
+      </div>
+      <div
+        ref={editorRef}
+        contentEditable
+        onInput={handleInput}
+        className={`p-3 min-h-[100px] text-sm focus:outline-none ${className}`}
+      />
+    </div>
+  );
+};
+
 const App = () => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -229,6 +296,7 @@ const App = () => {
   const [activeCalcField, setActiveCalcField] = useState(null); // 계산기 모달 상태
   const [reportData, setReportData] = useState({
     reportType: "liability", // liability(배상), longTerm(장기), medical(실손), auto(자동차)
+    reportTitle: "손 해 사 정 서",
     company: { name: "", address: "", repName: "", repPhone: "", regNo: "", investigator: "", investigatorPhone: "", investigatorRegNo: "", stampUrl: "" },
     engagement: {
       assignedDate: "", content: "",
@@ -364,7 +432,6 @@ const App = () => {
         lostEarningsPeriods: [{ income: 0, rate: 0, hoffman: 0 }],
         nursingDays: 0,
         nursingDailyWage: 0,
-        transportationExpenses: 0,
         transportationDays: targetCase.outDays || 0,
         transportationDailyRate: 8000
       });
@@ -526,6 +593,20 @@ const App = () => {
         current = current[keys[i]];
       }
       current[keys[keys.length - 1]] = value;
+      return newData;
+    });
+  };
+
+  const updateReportListIndex = (path, index, field, value) => {
+    const keys = path.split('.');
+    setReportData(prev => {
+      const newData = { ...prev };
+      let current = newData;
+      for (let i = 0; i < keys.length - 1; i++) {
+        current[keys[i]] = { ...current[keys[i]] };
+        current = current[keys[i]];
+      }
+      current[keys[keys.length - 1]][index] = { ...current[keys[keys.length - 1]][index], [field]: value };
       return newData;
     });
   };
@@ -1872,10 +1953,10 @@ const App = () => {
                         </div>
                         <InputGroup label="사고원인"><input type="text" value={reportData.accident.cause} onChange={e => updateReportField('accident.cause', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
                         <InputGroup label={reportData.reportType === 'longTermDisease' ? "치료내용" : "사고내용"}>
-                          <textarea rows={3} value={reportData.accident.details} onChange={e => updateReportField('accident.details', e.target.value)} className="w-full border p-2 rounded-md text-sm" />
+                          <RichTextEditor value={reportData.accident.details} onChange={val => updateReportField('accident.details', val)} />
                         </InputGroup>
                         {reportData.reportType !== 'longTermDisease' && (
-                          <InputGroup label="사고발생관련사항(조사내용)"><textarea rows={3} value={reportData.accident.investigationDetails} onChange={e => updateReportField('accident.investigationDetails', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
+                          <InputGroup label="사고발생관련사항(조사내용)"><RichTextEditor value={reportData.accident.investigationDetails} onChange={val => updateReportField('accident.investigationDetails', val)} /></InputGroup>
                         )}
                       </div>
                     </FormSection>
@@ -1885,7 +1966,7 @@ const App = () => {
                         <div className="grid grid-cols-2 gap-4">
                           <InputGroup label="병원명"><input type="text" value={reportData.damage.hospital} onChange={e => updateReportField('damage.hospital', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
                           <InputGroup label="상병명"><input type="text" value={reportData.damage.diagnosis} onChange={e => updateReportField('damage.diagnosis', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                          <div className="col-span-2"><InputGroup label="치료내용"><textarea rows={2} value={reportData.damage.treatment} onChange={e => updateReportField('damage.treatment', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup></div>
+                          <div className="col-span-2"><InputGroup label="치료내용"><RichTextEditor value={reportData.damage.treatment} onChange={val => updateReportField('damage.treatment', val)} /></InputGroup></div>
                         </div>
                       </FormSection>
                     )}
@@ -2064,8 +2145,40 @@ const App = () => {
                     <div className="w-px h-8 bg-slate-200"></div>
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">글자 크기</span>
-                      <select value={reportStyles.fontSize} onChange={e => setReportStyles(prev => ({...prev, fontSize: e.target.value}))} className="bg-slate-100 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                        {[10, 11, 12, 13, 14, 15, 16].map(size => <option key={size} value={size}>{size}pt</option>)}
+                      <select 
+                        onMouseDown={e => e.preventDefault()}
+                        onChange={e => { 
+                          const selection = window.getSelection();
+                          if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+                            alert("크기를 변경할 글자를 마우스로 드래그하여 선택해주세요.");
+                            e.target.value = "";
+                            return;
+                          }
+
+                          let size = e.target.value;
+                          if (size === 'custom') {
+                            const customSize = window.prompt("글자 크기를 입력하세요 (숫자만 입력 시 pt로 적용됩니다)", "11");
+                            if (customSize) size = isNaN(customSize) ? customSize : customSize + 'pt';
+                            else { e.target.value = ""; return; }
+                          }
+
+                          document.execCommand('styleWithCSS', null, true);
+                          document.execCommand('fontSize', false, '7');
+                          const fontEls = document.querySelectorAll('font[size="7"], font[size="+4"], span[style*="font-size: xxx-large"], span[style*="font-size: 48px"], span[style*="font-size: 36pt"]');
+                          fontEls.forEach(el => {
+                            el.removeAttribute('size');
+                            el.style.fontSize = size;
+                          });
+                          e.target.value = ""; 
+                        }} 
+                        className="bg-slate-100 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" 
+                        value=""
+                      >
+                        <option value="" disabled>크기 선택</option>
+                        <option value="custom">직접 입력</option>
+                        {['9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '20pt', '24pt', '30pt', '36pt'].map(size => (
+                          <option key={size} value={size}>{size}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="w-px h-8 bg-slate-200"></div>
@@ -2073,13 +2186,8 @@ const App = () => {
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">문단 편집</span>
                       <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
                         <button 
-                          onClick={() => {
-                            if(!selectedElementId) return;
-                            setCustomStyles(prev => ({
-                              ...prev,
-                              [selectedElementId]: { ...prev[selectedElementId], bold: !prev[selectedElementId]?.bold }
-                            }));
-                          }}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => document.execCommand('bold')}
                           className={`p-2 rounded-lg transition-all ${customStyles[selectedElementId]?.bold ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                           title="굵게"
                         >
@@ -2129,82 +2237,103 @@ const App = () => {
                       wordBreak: 'keep-all'
                     }}
                   >
-                  <div 
-                    className={`text-center mb-16 pt-20 transition-all ${selectedElementId === 'header' ? 'ring-2 ring-indigo-500 ring-inset rounded-xl' : ''}`} 
-                    onClick={(e) => { e.stopPropagation(); setSelectedElementId('header'); }} 
-                    style={{ color: customStyles['header']?.color || 'inherit', fontWeight: customStyles['header']?.bold ? 'bold' : 'normal' }}
-                  >
-                    <div className="flex justify-end items-start mb-20 px-4"><span className="text-xs text-slate-400">사단법인 한국손해사정사회 정회원 양식</span></div>
-                    <h1 className="text-5xl font-extrabold tracking-[0.2em] mb-4 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('reportTitle', e.target.innerText)}>손 해 사 정 서</h1>
-                    <p className="text-slate-500 font-medium tracking-widest border-y border-slate-200 py-3 inline-block px-12 mb-32 uppercase">The Claim Adjustment Report</p>
-                    <div className="max-w-md mx-auto text-left space-y-10 mt-20">
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Subject</p><p className="text-xl font-bold">피해자 <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.engagement.victim.name}</span> 사고건</p></div>
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Date</p><p className="text-xl font-bold" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.assignedDate', e.target.innerText)}>{reportData.engagement.assignedDate}</p></div>
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Insurer</p><p className="text-xl font-bold" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerText)}>{reportData.policy.insurer}</p></div>
+                    <div className="flex justify-end items-start mb-20 px-4">
+                      <span className="text-xs text-slate-400">사단법인 한국손해사정사회 정회원 양식</span>
                     </div>
-                    <div className="mt-60 font-bold text-3xl outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerText)}>{reportData.company.name}</div>
-                  </div>
+                    <h1
+                      className="text-5xl font-extrabold tracking-[0.2em] mb-4 outline-none"
+                      contentEditable
+                      suppressContentEditableWarning={true}
+                      onBlur={e => updateReportField('reportTitle', e.target.innerHTML)}
+                      dangerouslySetInnerHTML={{ __html: reportData.reportTitle || "손 해 사 정 서" }}
+                    ></h1>
+                    <p 
+                      className="text-slate-500 font-medium tracking-widest border-y border-slate-200 py-3 inline-block px-12 mb-32 uppercase outline-none focus:bg-blue-50"
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={e => updateReportField('labels.subtitle', e.target.innerHTML)}
+                      dangerouslySetInnerHTML={{ __html: reportData.labels?.subtitle || "The Claim Adjustment Report" }}
+                    />
+                    <div className="max-w-md mx-auto text-left space-y-10 mt-20">
+                      <div className="border-b-2 border-slate-900 pb-3">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.subject', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.subject || "Subject" }} />
+                        <p className="text-xl font-bold">
+                          <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.subjectPrefix', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.subjectPrefix || "피해자 " }} />
+                          <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.name }} />
+                          <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.subjectSuffix', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.subjectSuffix || " 사고건" }} />
+                        </p>
+                      </div>
+                      <div className="border-b-2 border-slate-900 pb-3">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.date', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.date || "Date" }} />
+                        <p className="text-xl font-bold outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.assignedDate', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.assignedDate }} />
+                      </div>
+                      <div className="border-b-2 border-slate-900 pb-3">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.insurer', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.insurer || "Insurer" }} />
+                        <p className="text-xl font-bold outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.insurer }} />
+                      </div>
+                    </div>
+                    <div className="mt-60 font-bold text-3xl outline-none" contentEditable suppressContentEditableWarning={true} onBlur={e => updateReportField('company.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.company.name }}></div>
                   <div className="page-break h-2" />
                   <div className="py-10">
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3">1. 위임자 및 피해자 인적사항</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section1', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section1 || "1. 위임자 및 피해자 인적사항" }} />
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center">위임자</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.name', e.target.innerText)}>{reportData.engagement.mandator.name}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.birthDate', e.target.innerText)}>{reportData.engagement.mandator.birthDate}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.phone', e.target.innerText)}>{reportData.engagement.mandator.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.job', e.target.innerText)}>{reportData.engagement.mandator.job}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.address', e.target.innerText)}>{reportData.engagement.mandator.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.relation', e.target.innerText)}>{reportData.engagement.mandator.relation}</div>
+                      <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.mandatorHeader', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.mandatorHeader || "위임자" }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.name || "성명" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.name }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.birth', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.birth || "생년월일" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.birthDate', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.birthDate }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.phone || "연락처" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.phone }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.job', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.job || "직업" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.job', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.job }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.address || "주소" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.address }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.relation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.relation || "관계" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.relation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.mandator.relation }} />
 
-                      <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center">피해자(피보험자)</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerText)}>{reportData.engagement.victim.name}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.birthDate', e.target.innerText)}>{reportData.engagement.victim.birthDate}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.phone', e.target.innerText)}>{reportData.engagement.victim.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.job', e.target.innerText)}>{reportData.engagement.victim.job}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.address', e.target.innerText)}>{reportData.engagement.victim.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.relation', e.target.innerText)}>{reportData.engagement.victim.relation}</div>
+                      <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.victimHeader', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.victimHeader || "피해자(피보험자)" }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.name || "성명" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.name }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.birth', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.birth || "생년월일" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.birthDate', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.birthDate }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.phone || "연락처" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.phone }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.job', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.job || "직업" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.job', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.job }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.address || "주소" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.address }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.relation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.relation || "관계" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.relation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.engagement.victim.relation }} />
                     </div>
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">2. 보험계약사항</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section2', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section2 || "2. 보험계약사항" }} />
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험회사</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerText)}>{reportData.policy.insurer}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험종목</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.item', e.target.innerText)}>{reportData.policy.item}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">증권번호</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.policyNo', e.target.innerText)}>{reportData.policy.policyNo}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">계약자</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.contractor', e.target.innerText)}>{reportData.policy.contractor}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">피보험자</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insured', e.target.innerText)}>{reportData.policy.insured}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.phone', e.target.innerText)}>{reportData.policy.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.address', e.target.innerText)}>{reportData.policy.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험기간</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.period', e.target.innerText)}>{reportData.policy.period}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보상한도/자부담</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.limitDeductible', e.target.innerText)}>{reportData.policy.limitDeductible}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">담보내용</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.coverageDetails', e.target.innerText)}>{reportData.policy.coverageDetails}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">기타사항</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.otherDetails', e.target.innerText)}>{reportData.policy.otherDetails}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.insurer', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.insurer || "보험회사" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.insurer }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.item', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.item || "보험종목" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.item', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.item }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.policyNo', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.policyNo || "증권번호" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.policyNo', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.policyNo }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.contractor', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.contractor || "계약자" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.contractor', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.contractor }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.insured', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.insured || "피보험자" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insured', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.insured }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.phone || "연락처" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.phone', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.phone }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.address || "주소" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.address', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.address }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.period', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.period || "보험기간" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.period', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.period }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.limit', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.limit || "보상한도/자부담" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.limitDeductible', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.limitDeductible }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.coverage', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.coverage || "담보내용" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.coverageDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.coverageDetails }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.other', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.other || "기타사항" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.otherDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.otherDetails }} />
                     </div>
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">3. 사고사항</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section3', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section3 || "3. 사고사항" }} />
                     <div className="border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고개요</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.overview', e.target.innerText)}>{reportData.accident.overview}</div>
+                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.overview || "사고개요" }} />
+                      <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.overview }} />
                       <div className="grid grid-cols-4">
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고일시</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.time', e.target.innerText)}>{reportData.accident.time}</div>
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고장소</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.place', e.target.innerText)}>{reportData.accident.place}</div>
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.time || "사고일시" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.time }} />
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.place || "사고장소" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.place }} />
                       </div>
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고원인</div>
-                      <div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.cause', e.target.innerText)}>{reportData.accident.cause}</div>
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고내용</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.details', e.target.innerText)}>{reportData.accident.details}</div>
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고발생관련사항(조사내용)</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.investigationDetails', e.target.innerText)}>{reportData.accident.investigationDetails}</div>
+                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.cause || "사고원인" }} />
+                      <div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.cause }} />
+                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.details', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.details || "사고내용" }} />
+                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.details', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.details }} />
+                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.investigation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.investigation || "사고발생관련사항(조사내용)" }} />
+                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.investigationDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.investigationDetails }} />
                     </div>
                     <div className="page-break h-2" />
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">4. 손해내용</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section4', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section4 || "4. 손해내용" }} />
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">병원명</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.hospital', e.target.innerText)}>{reportData.damage.hospital}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">상병명</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.diagnosis', e.target.innerText)}>{reportData.damage.diagnosis}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">치료내용</div><div className="p-3 border-b border-slate-900 col-span-3 min-h-[50px] whitespace-pre-wrap outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.treatment', e.target.innerText)}>{reportData.damage.treatment}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.hospital', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.hospital || "병원명" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.hospital', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.damage.hospital }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.diagnosis', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.diagnosis || "상병명" }} /><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.diagnosis', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.damage.diagnosis }} />
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.treatment', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.treatment || "치료내용" }} /><div className="p-3 border-b border-slate-900 col-span-3 min-h-[50px] whitespace-pre-wrap outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.treatment', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.damage.treatment }} />
                     </div>
 
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">{reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "5. 보험사의 보험금 지급책임 검토" : "5. 손해배상책임 등 검토"}</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section6', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section6 || (reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "5. 보험사의 보험금 지급책임 검토" : "5. 손해배상책임 등 검토") }} />
                     <div className="border-2 border-slate-200 p-6 space-y-6 text-sm">
                       <div>
-                        <h4 className="font-bold text-blue-800 mb-2">가. {reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임" : "피보험자 손해배상책임"} (<span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.liabilityStatus', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.liability.liabilityStatus}</span>)</h4>
+                        <h4 className="font-bold text-blue-800 mb-2">가. {reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임" : "피보험자 손해배상책임"} (<span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.liabilityStatus', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: reportData.liability.liabilityStatus }} />)</h4>
                         <div className="space-y-2">
                           <p className="font-bold text-slate-700">1) 약관상 보험자 지급책임 근거</p>
                           <div className="ml-5 space-y-2">
@@ -2222,8 +2351,8 @@ const App = () => {
                                   <p className="leading-relaxed">{item}</p>
                                 ) : (
                                   <>
-                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span>]</p>
-                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'content', e.target.innerText)}>{item.content}</p>
+                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'title', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: item.title }} />]</p>
+                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'content', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: item.content }} />
                                   </>
                                 )}
                               </div>
@@ -2245,8 +2374,8 @@ const App = () => {
                                   <p className="leading-relaxed">{item}</p>
                                 ) : (
                                   <>
-                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span>]</p>
-                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'content', e.target.innerText)}>{item.content}</p>
+                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'title', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: item.title }} />]</p>
+                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'content', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: item.content }} />
                                   </>
                                 )}
                               </div>
@@ -2257,7 +2386,7 @@ const App = () => {
                       
                       {(reportData.reportType === 'liability' || reportData.reportType === 'auto') && (
                         <div>
-                          <h4 className="font-bold text-amber-800 mb-2">나. 피해자의 과실상계 (과실 <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.faultPercent', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.liability.faultPercent}</span>%)</h4>
+                          <h4 className="font-bold text-amber-800 mb-2">나. 피해자의 과실상계 (과실 <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.faultPercent', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: reportData.liability.faultPercent }} />%)</h4>
                         </div>
                       )}
                       
@@ -2274,20 +2403,25 @@ const App = () => {
                                 fontWeight: customStyles[`pay-${idx}`]?.bold ? 'bold' : 'normal' 
                               }}
                             >
-                              <p className="font-bold text-slate-700 mb-1">{idx + 1}. <span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.paymentLiability', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span></p>
-                              <p className="leading-relaxed whitespace-pre-wrap pl-2 outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.paymentLiability', idx, 'content', e.target.innerText)}>{item.content}</p>
+                              <p 
+                                className="leading-relaxed whitespace-pre-wrap pl-2 outline-none focus:bg-blue-50 px-1 rounded" 
+                                contentEditable 
+                                suppressContentEditableWarning 
+                                onBlur={e => updateReportListIndex('liability.paymentLiability', idx, 'content', e.target.innerHTML)}
+                                dangerouslySetInnerHTML={{ __html: item.content }}
+                              ></p>
                             </div>
                           ))}
                         </div>
                       </div>
                     </div>
                     <div className="mt-32 text-right">
-                      <p className="text-lg mb-10">위와 같이 정당하게 손해사정 하였음을 확인합니다.</p>
-                      <p className="text-2xl font-bold mb-2 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerText)}>{reportData.company.name}</p>
+                      <p className="text-lg mb-10 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.confirmation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.confirmation || "위와 같이 정당하게 손해사정 하였음을 확인합니다." }} />
+                      <p className="text-2xl font-bold mb-2 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.company.name }} />
                       <div className="flex justify-end gap-12 mt-4">
-                        <div className="text-left"><p className="text-xs text-slate-400">대표 손해사정사</p>
+                        <div className="text-left"><p className="text-xs text-slate-400 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.rep', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.rep || "대표 손해사정사" }} />
                         <div className="relative inline-block min-w-[100px]">
-                          <p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.repName', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.company.repName}</span> (인)</p>
+                          <p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.repName', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: reportData.company.repName }} /> (인)</p>
                           {(reportData.company.stampUrl || profile?.stampUrl) && (
                             <img 
                               key={`preview-${reportData.company.stampUrl || profile?.stampUrl}`}
@@ -2298,9 +2432,9 @@ const App = () => {
                             />
                           )}
                         </div>
-                        <p className="text-[10px]" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.regNo', e.target.innerText)}>{reportData.company.regNo}</p></div>
+                        <p className="text-[10px]" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.regNo', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.company.regNo }} /></div>
                         {reportData.company.investigator && (
-                          <div className="text-left"><p className="text-xs text-slate-400">담당 조사자</p><p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.investigator', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.company.investigator}</span> (서명)</p></div>
+                          <div className="text-left"><p className="text-xs text-slate-400 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.investigator', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.investigator || "담당 조사자" }} /><p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.investigator', e.target.innerHTML)} className="outline-none focus:bg-blue-50 px-1 rounded" dangerouslySetInnerHTML={{ __html: reportData.company.investigator }} /> (서명)</p></div>
                         )}
                       </div>
                     </div>
@@ -3254,10 +3388,6 @@ const App = () => {
         }
         #print-area {
           font-family: 'GulimChe', '굴림체', 'Gulim', '굴림', sans-serif !important;
-        }
-        #print-area .text-sm, 
-        #print-area .leading-relaxed {
-          font-size: inherit !important;
         }
         #print-area [contenteditable="true"]:hover {
           background-color: #f8fafc;
