@@ -4,7 +4,8 @@ import {
   Trash2, Edit2, X, Save, TrendingUp, Download, Loader2, 
   History, PlusCircle, ShieldCheck, LogOut, LogIn, UserPlus, Lock, Mail,
   FileSearch, Printer, Copy, FileCheck, AlertCircle, Map as MapIcon, KeyRound,
-  ArrowLeft, PlusSquare, MinusCircle, FileEdit, CloudUpload, Calendar, ChevronLeft,
+  ArrowLeft, PlusSquare, MinusCircle, FileEdit, CloudUpload, Calendar, ChevronLeft, MessageSquare, ArrowUp, ArrowDown, AlignLeft, AlignCenter, AlignJustify, Bold, Palette, Eraser,
+  Paperclip, ExternalLink, Users,
   User, Shield, Calculator, Landmark, PenTool
 } from 'lucide-react';
 
@@ -150,6 +151,8 @@ const App = () => {
   });
 
   const [isQuickModalOpen, setIsQuickModalOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [signUpData, setSignUpData] = useState({
     email: '', password: '', passwordConfirm: '',
@@ -168,6 +171,47 @@ const App = () => {
   const [statusFilter, setStatusFilter] = useState('전체');
   
   const [pendingUsers, setPendingUsers] = useState([]);
+
+  // 상담일지 상태
+  const [consultations, setConsultations] = useState([]);
+  const [consultationSearch, setConsultationSearch] = useState('');
+  const [isConsultationModalOpen, setIsConsultationModalOpen] = useState(false);
+  const [editingConsultation, setEditingConsultation] = useState({
+    date: new Date().toISOString().split('T')[0],
+    clientName: '',
+    phone: '',
+    content: '',
+    status: '상담중'
+  });
+
+  // 리포트 스타일 및 개별 문단 스타일 상태
+  const [reportStyles, setReportStyles] = useState({
+    textAlign: 'left',
+    lineHeight: '1.6',
+    fontSize: '11'
+  });
+  const [customStyles, setCustomStyles] = useState({});
+  const [selectedElementId, setSelectedElementId] = useState(null);
+
+  // 리포트 리스트 아이템 이동 함수
+  const moveReportListItem = (path, index, direction) => {
+    const keys = path.split('.');
+    setReportData(prev => {
+      const newData = { ...prev };
+      let current = newData;
+      for (let i = 0; i < keys.length - 1; i++) {
+        current[keys[i]] = { ...current[keys[i]] };
+        current = current[keys[i]];
+      }
+      const list = [...current[keys[keys.length - 1]]];
+      const newIndex = direction === 'up' ? index - 1 : index + 1;
+      if (newIndex >= 0 && newIndex < list.length) {
+        [list[index], list[newIndex]] = [list[newIndex], list[index]];
+        current[keys[keys.length - 1]] = list;
+      }
+      return newData;
+    });
+  };
 
   // 할 일(To-Do) 상태
   const [todos, setTodos] = useState([]);
@@ -202,7 +246,7 @@ const App = () => {
       hospital: "", diagnosis: "", treatment: ""
     },
     liability: {
-      liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: ""
+      liabilityStatus: "", policyLiabilityBasis: [], legalLiabilityBasis: [], faultPercent: 0, paymentLiability: []
     },
     assessment: {
       medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0
@@ -235,6 +279,20 @@ const App = () => {
     transportationDailyRate: 8000
   });
   const [selectedCalcCaseId, setSelectedCalcCaseId] = useState('');
+  const [selectedReportCaseId, setSelectedReportCaseId] = useState('');
+
+  // --- 지급책임 검토용 입력 상태 및 라이브러리 ---
+  const [newPolicyBasis, setNewPolicyBasis] = useState({ title: '', content: '' });
+  const [newLegalBasis, setNewLegalBasis] = useState({ title: '', content: '' });
+  const [newPayLiab, setNewPayLiab] = useState({ title: '', content: '' });
+
+  const [liabilityLibrary, setLiabilityLibrary] = useState([
+    { title: '지급책임의 발생', content: '본 건 사고는 피보험자의 업무 수행 중 발생한 사고로, 약관상 보상하는 손해에 해당하여 보험사의 보험금 지급책임이 발생함.' },
+    { title: '약관상 보상책임', content: '해당 보험계약의 보통약관 및 특별약관 규정에 의거, 피보험자가 피해자에게 부담하는 법률상 배상책임을 담보하므로 지급책임이 인정됨.' },
+    { title: '면책사항 검토', content: '사고 경위 조사 결과, 약관에서 정한 고의 또는 중과실 등 면책사유에 해당하지 않음을 확인하였음.' },
+    { title: '보험금 지급의 결정', content: '사고 경위 및 손해 정도를 종합적으로 고려하여 다음과 같이 보험금을 산정함.' },
+    { title: '손해배상금의 산정', content: '피해자의 소득, 장해율, 과실비율 등을 종합적으로 검토하여 약관상 지급기준에 따라 손해액을 산출함.' }
+  ]);
 
   const handleSaveStandaloneCalc = async () => {
     if (!user || !selectedCalcCaseId) {
@@ -290,10 +348,10 @@ const App = () => {
         hospStartDate: '', hospEndDate: '', outStartDate: '', outEndDate: '',
         accidentDate: targetCase.incidentDiagnosisDate || targetCase.receptionDate || '',
         victimName: targetCase.clientName || '',
-        birthDate: '', occupation: '', monthlyIncome: 0,
+        birthDate: targetCase.birthDate || '', occupation: targetCase.occupation || '', monthlyIncome: 0,
         diagnosis: (targetCase.diagnoses || []).join(', '),
-        hospDays: 0, outDays: 0, initialWeeks: 0,
-        injuryGrade: '', disabilityGrade: '', lossRate: 0, workMonths: 0, hoffman: 0,
+        hospDays: 0, outDays: 0, initialWeeks: targetCase.initialWeeks || 0,
+        injuryGrade: targetCase.injuryGrade || '', disabilityGrade: targetCase.disabilityGrade || '', lossRate: 0, workMonths: 0, hoffman: 0,
         lostWagesMultiplier: 0.85,
         lostWagesDays: 0,
         lostWagesIncome: 0,
@@ -310,6 +368,17 @@ const App = () => {
         transportationDays: targetCase.outDays || 0,
         transportationDailyRate: 8000
       });
+    }
+  };
+
+  const handleLoadReportCase = () => {
+    if (!selectedReportCaseId) {
+      alert("불러올 고객(사건)을 선택해주세요.");
+      return;
+    }
+    const targetCase = cases.find(c => c.id === selectedReportCaseId);
+    if (targetCase) {
+      startReport(targetCase);
     }
   };
 
@@ -373,19 +442,22 @@ const App = () => {
     let injuryAlimony = 0;
     if (!isNaN(gradeNum)) {
       const injuryTable = {
-        1: 2000000, 2: 1760000, 3: 1520000, 4: 1280000, 5: 1040000,
-        6: 800000, 7: 560000, 8: 400000, 9: 240000, 10: 200000,
-        11: 160000, 12: 150000, 13: 150000, 14: 150000
+        1: 2000000, 2: 1760000, 3: 1520000, 4: 1280000, 5: 750000,
+        6: 500000, 7: 400000, 8: 300000, 9: 250000, 10: 200000,
+        11: 200000, 12: 150000, 13: 150000, 14: 150000
       };
       injuryAlimony = injuryTable[gradeNum] || 0;
     }
 
     const lossRateVal = Number(standaloneCalc.lossRate) || 0;
-    let calculatedAlimony = standaloneCalc.alimony;
-    const isAutoAlimony = lossRateVal < 50;
+    let disabilityAlimony = 0;
 
-    if (isAutoAlimony) {
-      let disabilityAlimony = 0;
+    // 장해 위자료 산출 (자동차보험 약관 기준)
+    if (lossRateVal >= 50) {
+      // 50% 이상: 4,500만원 * 상실률 * 85% (65세 미만 기준)
+      disabilityAlimony = Math.floor(45000000 * (lossRateVal / 100) * 0.85);
+    } else if (lossRateVal > 0) {
+      // 50% 미만: 등급별 정액 기준
       if (lossRateVal >= 45) disabilityAlimony = 4000000;
       else if (lossRateVal >= 35) disabilityAlimony = 2400000;
       else if (lossRateVal >= 27) disabilityAlimony = 2000000;
@@ -393,18 +465,22 @@ const App = () => {
       else if (lossRateVal >= 14) disabilityAlimony = 1200000;
       else if (lossRateVal >= 9) disabilityAlimony = 1000000;
       else if (lossRateVal >= 5) disabilityAlimony = 800000;
-      else if (lossRateVal > 0) disabilityAlimony = 500000;
-
-      calculatedAlimony = Math.max(injuryAlimony, disabilityAlimony);
+      else disabilityAlimony = 500000;
     }
+
+    // 부상위자료와 장해위자료 중 높은 금액 선택
+    const calculatedAlimony = Math.max(injuryAlimony, disabilityAlimony);
     
-    if (standaloneCalc.lostWages !== lostWages || standaloneCalc.lostEarnings !== lostEarnings || standaloneCalc.nursingExpenses !== nursingExpenses || standaloneCalc.transportationExpenses !== transportationExpenses) {
+    if (standaloneCalc.lostWages !== lostWages || standaloneCalc.lostEarnings !== lostEarnings || 
+        standaloneCalc.nursingExpenses !== nursingExpenses || standaloneCalc.transportationExpenses !== transportationExpenses ||
+        standaloneCalc.alimony !== calculatedAlimony) {
       setStandaloneCalc(prev => ({ 
         ...prev, 
         lostWages, 
         lostEarnings, 
         nursingExpenses,
-        transportationExpenses
+        transportationExpenses,
+        alimony: calculatedAlimony
       }));
     }
   }, [
@@ -429,7 +505,7 @@ const App = () => {
     const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, nursingExpenses, transportationExpenses, alimony, otherDamages } = reportData.assessment;
     const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(nursingExpenses)||0) + (Number(transportationExpenses)||0) + (Number(alimony)||0) + (Number(otherDamages)||0);
     // 장기/실손 보험은 과실상계 미적용
-    const fault = (reportData.reportType === 'longTerm' || reportData.reportType === 'medical') ? 0 : (Number(reportData.liability.faultPercent) || 0);
+    const fault = (reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical') ? 0 : (Number(reportData.liability.faultPercent) || 0);
     const faultOffset = Math.floor(subTotal * (fault / 100));
     const finalPayment = subTotal - faultOffset;
     
@@ -580,6 +656,40 @@ const App = () => {
     });
     return () => unsubscribe();
   }, [user]);
+
+  // --- 상담일지 데이터 로드 ---
+  useEffect(() => {
+    if (!user) return;
+    const consultationsCol = collection(db, 'artifacts', appId, 'users', user.uid, 'consultations');
+    const unsubscribe = onSnapshot(consultationsCol, (snapshot) => {
+      setConsultations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleSaveConsultation = async (data) => {
+    if (!user || !data) return;
+    try {
+      if (data.id) {
+        const { id, ...fields } = data;
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'consultations', id), cleanData(fields));
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'consultations'), cleanData({
+          ...data,
+          createdAt: new Date().toISOString()
+        }));
+      }
+      setIsConsultationModalOpen(false);
+      setEditingConsultation(null);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteConsultation = async (id) => {
+    if (!user || !window.confirm("상담 기록을 삭제하시겠습니까?")) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'consultations', id));
+    } catch (err) { console.error(err); }
+  };
 
   // --- 관리자 전용: 승인 대기자 조회 및 승인 핸들러 ---
   const fetchPendingUsers = async () => {
@@ -732,6 +842,25 @@ const App = () => {
     }
   };
 
+  const handleOpenEditModal = (c) => {
+    let insurances = c.insurances ? [...c.insurances] : [{
+      insuranceType: c.insuranceType || '자동차보험',
+      insuranceCompany: c.insuranceCompany,
+      claimNumber: c.claimNumber,
+      policyNumber: c.policyNumber,
+      productName: c.productName,
+      coverageName: c.coverageName,
+      reviewerInfo: c.reviewerInfo,
+      investigatorInfo: c.investigatorInfo,
+      coverageDetails: c.coverageDetails || []
+    }];
+    if (c.insurances && c.coverageDetails?.length > 0 && !insurances[0].coverageDetails) {
+        insurances[0] = { ...insurances[0], coverageDetails: c.coverageDetails };
+    }
+    setEditingCase({...c, insurances, coverageDetails: c.coverageDetails || [], attachments: c.attachments || []});
+    setIsModalOpen(true);
+  };
+
   // --- 사건 데이터 저장 (데이터 격리 및 보호) ---
   const handleSaveCase = async (formData) => {
     if (!user || !formData) return;
@@ -833,6 +962,7 @@ const App = () => {
       return matchesSearch && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }
     if (statusFilter === '미결') return matchesSearch && c.status !== '종결';
+    if (statusFilter === '사정서작성') return matchesSearch && !!c.reportData;
     return matchesSearch && c.status === statusFilter;
   });
 
@@ -843,13 +973,26 @@ const App = () => {
   const startReport = (caseData) => {
     setSelectedCaseForReport(caseData);
     if (caseData.reportData) {
-      setReportData(caseData.reportData);
+      const data = { ...caseData.reportData };
+      if (data.liability) {
+        if (data.liability.judgmentBasis && (!data.liability.policyLiabilityBasis || data.liability.policyLiabilityBasis.length === 0)) {
+          data.liability.policyLiabilityBasis = [{ title: '약관상 근거', content: data.liability.judgmentBasis }];
+        }
+        if (data.liability.legalBasis && (!data.liability.legalLiabilityBasis || data.liability.legalLiabilityBasis.length === 0)) {
+          data.liability.legalLiabilityBasis = [{ title: '법률상 근거', content: data.liability.legalBasis }];
+        }
+        if (data.liability.paymentResponsibility && (!data.liability.paymentLiability || data.liability.paymentLiability.length === 0)) {
+          data.liability.paymentLiability = [{ title: '검토 의견', content: data.liability.paymentResponsibility }];
+        }
+      }
+      setReportData(data);
     } else {
       // 보험 종목에 따른 리포트 타입 자동 설정
       let rType = 'liability';
       const iType = caseData.insurances?.[0]?.insuranceType;
       if (iType === '자동차보험') rType = 'auto';
-      else if (iType === '장기보험') rType = 'longTerm';
+      else if (iType === '장기보험(질병)') rType = 'longTermDisease';
+      else if (iType === '장기보험(상해)') rType = 'longTermInjury';
       else if (iType === '실손보험' || iType === '선임권(실손)') rType = 'medical';
 
       // 기존 사건 정보로 리포트 데이터 초기화
@@ -889,7 +1032,7 @@ const App = () => {
           hospital: "", diagnosis: (caseData.diagnoses || []).join(", "), treatment: ""
         },
         liability: {
-          liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: ""
+          liabilityStatus: "", policyLiabilityBasis: [], legalLiabilityBasis: [], faultPercent: 0, paymentLiability: []
         },
         assessment: {
             medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0
@@ -939,6 +1082,46 @@ const App = () => {
 
   const removeDiagnosis = (idx) => {
     setEditingCase(prev => ({ ...prev, diagnoses: prev.diagnoses.filter((_, i) => i !== idx) }));
+  };
+
+  // 파일 업로드 공통 로직
+  const processFiles = async (fileList) => {
+    const files = Array.from(fileList);
+    if (!files.length || !user) return;
+
+    setIsUploading(true);
+    try {
+      const uploadedFiles = [];
+      for (const file of files) {
+        const storageRef = ref(storage, `users/${user.uid}/cases/attachments/${Date.now()}_${file.name}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        uploadedFiles.push({
+          name: file.name,
+          url: url,
+          type: file.type,
+          createdAt: new Date().toISOString()
+        });
+      }
+      setEditingCase(prev => ({ 
+        ...prev, 
+        attachments: [...(prev?.attachments || []), ...uploadedFiles] 
+      }));
+    } catch (error) {
+      alert("파일 업로드 실패: " + error.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    processFiles(e.target.files);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    processFiles(e.dataTransfer.files);
   };
 
   const handleDelete = async (id) => {
@@ -1189,8 +1372,10 @@ const App = () => {
           <nav className="space-y-3">
             <button onClick={()=>setView('dashboard')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='dashboard'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><LayoutDashboard size={20}/> 대시보드</button>
             <button onClick={()=>setView('list')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='list'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileText size={20}/> 사건 관리대장</button>
+            <button onClick={()=>setView('consultation')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='consultation'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><MessageSquare size={20}/> 고객 상담일지</button>
             <button onClick={handleNewReport} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='report'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileEdit size={20}/> 손해사정서 작성</button>
             <button onClick={()=>setView('calculator')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='calculator'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><Calculator size={20}/> 손해배상금 산출</button>
+            <button onClick={()=>setView('community')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='community'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><Users size={20}/> 실무지식교류방</button>
             
             {profile?.email === 'sopy1337@gmail.com' && (
               <button onClick={()=>setView('admin')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='admin'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}>
@@ -1223,7 +1408,7 @@ const App = () => {
           <div className="flex items-center gap-6">
             {view === 'report' && <button onClick={()=>setView('list')} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><ChevronLeft size={24}/></button>}
             <h2 className="text-2xl font-black text-slate-800 tracking-tight italic uppercase underline decoration-indigo-500 decoration-4 underline-offset-8 tracking-tighter">
-              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : view === 'admin' ? '신규 가입자 승인' : view === 'calculator' ? '손해배상금 산출' : '현황판'}
+              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : view === 'consultation' ? '고객 상담일지' : view === 'community' ? '실무지식교류방' : view === 'admin' ? '신규 가입자 승인' : view === 'calculator' ? '손해배상금 산출' : '현황판'}
             </h2>
           </div>
           <div className="flex gap-4">
@@ -1239,7 +1424,7 @@ const App = () => {
                 <button onClick={()=>window.print()} className="bg-slate-900 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Printer size={18}/> PDF / 인쇄</button>
               </>
             ) : (
-              <button onClick={()=>{setEditingCase({logs:[], diagnoses: [], status: '접수', payoutAmount: 0, disabilityRate: 0, amount: 0, insurances: [{insuranceType: '자동차보험', coverageDetails: []}], coverageDetails: [], receptionDate: new Date().toISOString().split('T')[0]}); setIsModalOpen(true);}} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Plus size={20}/> 사건 신규 등록</button>
+              <button onClick={()=>{setEditingCase({logs:[], diagnoses: [], attachments: [], status: '접수', payoutAmount: 0, disabilityRate: 0, amount: 0, insurances: [{insuranceType: '자동차보험', coverageDetails: []}], coverageDetails: [], receptionDate: new Date().toISOString().split('T')[0]}); setIsModalOpen(true);}} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"><Plus size={20}/> 사건 신규 등록</button>
             )}
           </div>
         </header>
@@ -1417,12 +1602,102 @@ const App = () => {
             </div>
           )}
 
+          {/* COMMUNITY VIEW */}
+          {view === 'community' && (
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl"><Users size={28}/></div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight">실무지식교류방</h3>
+                  <p className="text-sm font-bold text-slate-400">손해사정 실무 지식과 노하우를 공유하는 공간입니다.</p>
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center py-32 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/30">
+                <div className="w-20 h-20 bg-white rounded-3xl shadow-sm flex items-center justify-center text-slate-200 mb-6"><Users size={40}/></div>
+                <p className="text-slate-400 font-black text-lg tracking-tight">지식 교류를 위한 커뮤니티 기능을 준비 중입니다.</p>
+                <p className="text-slate-300 text-sm font-bold mt-2">곧 새로운 소통의 장으로 찾아뵙겠습니다.</p>
+              </div>
+            </div>
+          )}
+
+          {/* CONSULTATION LOG VIEW */}
+          {view === 'consultation' && (
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
+              <div className="p-8 bg-slate-50/30 border-b flex justify-between items-center">
+                <div className="relative w-[450px]">
+                  <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
+                  <input 
+                    type="text" 
+                    placeholder="고객명, 연락처, 상담내용 검색..." 
+                    className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" 
+                    value={consultationSearch} 
+                    onChange={e=>setConsultationSearch(e.target.value)}
+                  />
+                </div>
+                <button 
+                  onClick={()=>{
+                    setEditingConsultation({
+                      date: new Date().toISOString().split('T')[0],
+                      clientName: '',
+                      phone: '',
+                      content: '',
+                      status: '상담중'
+                    });
+                    setIsConsultationModalOpen(true);
+                  }} 
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black flex items-center gap-2 shadow-xl hover:scale-105 transition-all"
+                >
+                  <Plus size={20}/> 신규 상담 등록
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50/50 text-[10px] text-slate-400 font-black uppercase tracking-widest border-b">
+                    <tr>
+                      <th className="px-10 py-6">상담일자</th>
+                      <th className="px-8 py-6">고객명 / 연락처</th>
+                      <th className="px-8 py-6">상담 내용</th>
+                      <th className="px-6 py-6 text-center">상태</th>
+                      <th className="px-10 py-6 text-right">작업</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {consultations
+                      .filter(c => `${c.clientName} ${c.phone} ${c.content}`.toLowerCase().includes(consultationSearch.toLowerCase()))
+                      .sort((a, b) => new Date(b.date) - new Date(a.date))
+                      .map(c => (
+                        <tr key={c.id} className="hover:bg-indigo-50/10 group transition-all">
+                          <td className="px-10 py-8 font-bold text-sm text-slate-600">{c.date}</td>
+                          <td className="px-8 py-8">
+                            <p className="font-black text-sm text-slate-800">{c.clientName}</p>
+                            <p className="text-[10px] text-slate-400 font-bold">{c.phone}</p>
+                          </td>
+                          <td className="px-8 py-8">
+                            <p className="text-sm text-slate-600 line-clamp-2 max-w-md">{c.content}</p>
+                          </td>
+                          <td className="px-6 py-8 text-center">
+                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-black border ${c.status === '상담완료' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : c.status === '사건전환' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>{c.status}</span>
+                          </td>
+                          <td className="px-10 py-8 text-right">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                              <button onClick={() => { setEditingConsultation(c); setIsConsultationModalOpen(true); }} className="p-2 hover:text-indigo-600"><Edit2 size={16}/></button>
+                              <button onClick={() => handleDeleteConsultation(c.id)} className="p-2 hover:text-red-600"><Trash2 size={16}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* LIST */}
           {view === 'list' && (
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
               <div className="p-8 bg-slate-50/30 border-b flex justify-between items-center">
                 <div className="relative w-[450px]"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/><input type="text" placeholder="의뢰인, 진단명, 보험사 검색..." className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}/></div>
-                <div className="flex gap-4">{['전체', '당월접수', '미결', '종결'].map(s => <button key={s} onClick={()=>setStatusFilter(s)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${statusFilter===s?'bg-slate-900 text-white shadow-lg':'bg-white border text-slate-400 hover:bg-slate-50'}`}>{s}</button>)}</div>
+                <div className="flex gap-4">{['전체', '당월접수', '미결', '종결', '사정서작성'].map(s => <button key={s} onClick={()=>setStatusFilter(s)} className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${statusFilter===s?'bg-slate-900 text-white shadow-lg':'bg-white border text-slate-400 hover:bg-slate-50'}`}>{s}</button>)}</div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -1442,9 +1717,10 @@ const App = () => {
                       return (
                         <tr key={c.id} className="hover:bg-indigo-50/10 group transition-all">
                           <td className="px-10 py-8 font-black text-sm text-slate-800">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 cursor-pointer hover:text-indigo-600 transition-colors" onClick={() => handleOpenEditModal(c)}>
                               {c.clientName}
                               {isNew && <span className="px-2 py-0.5 bg-rose-500 text-white text-[8px] rounded-md animate-pulse">당월</span>}
+                              {c.reportData && <span className="px-2 py-0.5 bg-indigo-500 text-white text-[8px] rounded-md">사정서</span>}
                             </div>
                             <p className="text-[10px] text-slate-400 font-bold mt-1">계약자: {c.contractor || '-'}</p>
                           </td>
@@ -1454,24 +1730,7 @@ const App = () => {
                           <td className="px-10 py-8 text-right">
                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                               <button onClick={()=>startReport(c)} title="손해사정서 작성" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><FileEdit size={16}/></button>
-                              <button onClick={()=>{
-                                let insurances = c.insurances ? [...c.insurances] : [{
-                                  insuranceType: c.insuranceType || '자동차보험',
-                                  insuranceCompany: c.insuranceCompany,
-                                  claimNumber: c.claimNumber,
-                                  policyNumber: c.policyNumber,
-                                  productName: c.productName,
-                                  coverageName: c.coverageName,
-                                  reviewerInfo: c.reviewerInfo,
-                                  investigatorInfo: c.investigatorInfo,
-                                  coverageDetails: c.coverageDetails || []
-                                }];
-                                if (c.insurances && c.coverageDetails?.length > 0 && !insurances[0].coverageDetails) {
-                                    insurances[0] = { ...insurances[0], coverageDetails: c.coverageDetails };
-                                }
-                                setEditingCase({...c, insurances, coverageDetails: c.coverageDetails || []});
-                                setIsModalOpen(true);
-                              }} title="수정" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><Edit2 size={16}/></button>
+                              <button onClick={() => handleOpenEditModal(c)} title="수정" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-indigo-600 shadow-sm transition-all"><Edit2 size={16}/></button>
                               <button onClick={()=>handleDelete(c.id)} title="삭제" className="p-3 bg-white border border-slate-200 rounded-xl hover:text-red-600 shadow-sm transition-all"><Trash2 size={16}/></button>
                             </div>
                           </td>
@@ -1490,14 +1749,36 @@ const App = () => {
               {reportTab === 'input' ? (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                   <div className="lg:col-span-12 space-y-8">
-                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex items-center gap-4">
-                      <span className="font-bold text-sm text-slate-700">손해사정서 종류:</span>
-                      <select className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold outline-none" value={reportData.reportType || 'liability'} onChange={e => updateReportField('reportType', e.target.value)}>
-                        <option value="liability">배상책임 손해사정서</option>
-                        <option value="auto">자동차보험 손해사정서</option>
-                        <option value="longTerm">장기보험 손해사정서</option>
-                        <option value="medical">실손보험 손해사정서</option>
-                      </select>
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row items-center gap-6">
+                      <div className="flex-1 w-full space-y-1">
+                        <label className="text-xs font-bold text-slate-500 ml-1">의뢰인 불러오기</label>
+                        <div className="flex gap-2">
+                          <select 
+                            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold outline-none"
+                            value={selectedReportCaseId}
+                            onChange={(e) => setSelectedReportCaseId(e.target.value)}
+                          >
+                            <option value="">의뢰인 선택...</option>
+                            {cases.map(c => (
+                              <option key={c.id} value={c.id}>{c.clientName} {c.reportData ? '✓' : ''} ({c.insuranceCompany || '보험사 미정'})</option>
+                            ))}
+                          </select>
+                          <button onClick={handleLoadReportCase} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-black transition-all flex items-center gap-2">
+                            <History size={14}/> 불러오기
+                          </button>
+                        </div>
+                      </div>
+                      <div className="w-px h-10 bg-slate-200 hidden md:block"></div>
+                      <div className="w-full md:w-auto space-y-1">
+                        <label className="text-xs font-bold text-slate-500 ml-1">손해사정서 종류</label>
+                        <select className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold outline-none" value={reportData.reportType || 'liability'} onChange={e => updateReportField('reportType', e.target.value)}>
+                          <option value="liability">배상책임 손해사정서</option>
+                          <option value="auto">자동차보험 손해사정서</option>
+                          <option value="longTermDisease">장기보험 손해사정서(질병)</option>
+                          <option value="longTermInjury">장기보험 손해사정서(상해)</option>
+                          <option value="medical">실손보험 손해사정서</option>
+                        </select>
+                      </div>
                     </div>
                     <FormSection title="손해사정사(업체) 정보" icon={PenTool}>
                       <div className="grid grid-cols-2 gap-4 mb-4">
@@ -1548,7 +1829,7 @@ const App = () => {
                       </div>
                     </FormSection>
 
-                    <FormSection title="보험계약 및 사고사항" icon={Shield}>
+                    <FormSection title={reportData.reportType === 'longTermDisease' ? "보험계약 및 보험사고사항" : "보험계약 및 사고사항"} icon={Shield}>
                       <div className="grid grid-cols-3 gap-4 mb-4">
                         <InputGroup label="보험사"><input type="text" value={reportData.policy.insurer} onChange={e => updateReportField('policy.insurer', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
                         <InputGroup label="보험종목"><input type="text" value={reportData.policy.item} onChange={e => updateReportField('policy.item', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
@@ -1578,151 +1859,435 @@ const App = () => {
                       </div>
                       <hr className="my-4" />
                       <div className="space-y-4">
-                        <InputGroup label="사고개요"><input type="text" value={reportData.accident.overview} onChange={e => updateReportField('accident.overview', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                        {reportData.reportType !== 'longTermDisease' && (
+                          <InputGroup label="사고개요"><input type="text" value={reportData.accident.overview} onChange={e => updateReportField('accident.overview', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                        )}
                         <div className="grid grid-cols-2 gap-4">
-                          <InputGroup label="사고일시"><input type="datetime-local" value={reportData.accident.time} onChange={e => updateReportField('accident.time', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                          <InputGroup label="사고장소"><input type="text" value={reportData.accident.place} onChange={e => updateReportField('accident.place', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                          <InputGroup label={reportData.reportType === 'longTermDisease' ? "진단일" : "사고일시"}>
+                            <input type={reportData.reportType === 'longTermDisease' ? "date" : "datetime-local"} value={reportData.accident.time} onChange={e => updateReportField('accident.time', e.target.value)} className="w-full border p-2 rounded-md" />
+                          </InputGroup>
+                          <InputGroup label={reportData.reportType === 'longTermDisease' ? "치료병원" : "사고장소"}>
+                            <input type="text" value={reportData.accident.place} onChange={e => updateReportField('accident.place', e.target.value)} className="w-full border p-2 rounded-md" />
+                          </InputGroup>
                         </div>
                         <InputGroup label="사고원인"><input type="text" value={reportData.accident.cause} onChange={e => updateReportField('accident.cause', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                        <InputGroup label="사고내용"><textarea rows={3} value={reportData.accident.details} onChange={e => updateReportField('accident.details', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
-                        <InputGroup label="사고발생관련사항(조사내용)"><textarea rows={3} value={reportData.accident.investigationDetails} onChange={e => updateReportField('accident.investigationDetails', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
+                        <InputGroup label={reportData.reportType === 'longTermDisease' ? "치료내용" : "사고내용"}>
+                          <textarea rows={3} value={reportData.accident.details} onChange={e => updateReportField('accident.details', e.target.value)} className="w-full border p-2 rounded-md text-sm" />
+                        </InputGroup>
+                        {reportData.reportType !== 'longTermDisease' && (
+                          <InputGroup label="사고발생관련사항(조사내용)"><textarea rows={3} value={reportData.accident.investigationDetails} onChange={e => updateReportField('accident.investigationDetails', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
+                        )}
                       </div>
                     </FormSection>
 
-                    <FormSection title="손해내용" icon={Landmark}>
-                      <div className="grid grid-cols-2 gap-4">
-                        <InputGroup label="병원명"><input type="text" value={reportData.damage.hospital} onChange={e => updateReportField('damage.hospital', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                        <InputGroup label="상병명"><input type="text" value={reportData.damage.diagnosis} onChange={e => updateReportField('damage.diagnosis', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                        <div className="col-span-2"><InputGroup label="치료내용"><textarea rows={2} value={reportData.damage.treatment} onChange={e => updateReportField('damage.treatment', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup></div>
-                      </div>
-                    </FormSection>
+                    {reportData.reportType !== 'longTermDisease' && (
+                      <FormSection title="손해내용" icon={Landmark}>
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputGroup label="병원명"><input type="text" value={reportData.damage.hospital} onChange={e => updateReportField('damage.hospital', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                          <InputGroup label="상병명"><input type="text" value={reportData.damage.diagnosis} onChange={e => updateReportField('damage.diagnosis', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                          <div className="col-span-2"><InputGroup label="치료내용"><textarea rows={2} value={reportData.damage.treatment} onChange={e => updateReportField('damage.treatment', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup></div>
+                        </div>
+                      </FormSection>
+                    )}
 
-                    <FormSection title="손해액 산정" icon={Calculator}>
-                      <div className="grid grid-cols-2 gap-6">
-                        {Object.entries(assessmentLabels).map(([key, label]) => (
-                          <div key={key} className="space-y-1">
-                            <div className="flex justify-between items-center px-1">
-                              <label className="text-xs font-bold text-slate-500">{label}</label>
-                              <button onClick={() => setActiveCalcField(key)} className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px] font-bold">
-                                <Calculator size={12}/> 상세계산
-                              </button>
+                    {!reportData.reportType?.startsWith('longTerm') && (
+                      <FormSection title="손해액 산정" icon={Calculator}>
+                        <div className="grid grid-cols-2 gap-6">
+                          {Object.entries(assessmentLabels).map(([key, label]) => (
+                            <div key={key} className="space-y-1">
+                              <div className="flex justify-between items-center px-1">
+                                <label className="text-xs font-bold text-slate-500">{label}</label>
+                                <button onClick={() => setActiveCalcField(key)} className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px] font-bold">
+                                  <Calculator size={12}/> 상세계산
+                                </button>
+                              </div>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
+                                <input 
+                                  type="text" 
+                                  className="w-full pl-8 pr-3 py-2 border rounded-md text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={formatComma(reportData.assessment[key])}
+                                  onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
+                                />
+                              </div>
                             </div>
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
-                              <input 
-                                type="text" 
-                                className="w-full pl-8 pr-3 py-2 border rounded-md text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                value={formatComma(reportData.assessment[key])}
-                                onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
-                              />
+                          ))}
+                        </div>
+                        <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                          <div className="flex justify-between items-center font-bold text-slate-600 text-sm"><span>손해액 합계</span><span>₩{calcs.subTotal.toLocaleString()}</span></div>
+                          <div className="flex justify-between items-center font-bold text-rose-500 text-sm"><span>과실상계 ({reportData.liability.faultPercent}%)</span><span>- ₩{calcs.faultOffset.toLocaleString()}</span></div>
+                          <div className="flex justify-between items-center font-black text-indigo-600 pt-3 border-t border-slate-200 text-lg"><span>최종 사정금액</span><span>₩{calcs.finalPayment.toLocaleString()}</span></div>
+                        </div>
+                      </FormSection>
+                    )}
+
+                    <FormSection title={reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임 검토" : "손해배상책임 등 검토"} icon={Shield}>
+                      <div className="space-y-4">
+                        <InputGroup label={reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임 면/부책" : "피보험자 손해배상책임 면/부책"}><input type="text" value={reportData.liability.liabilityStatus} onChange={e => updateReportField('liability.liabilityStatus', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 ml-1">약관상 보험자 지급책임 근거</label>
+                          <div className="grid grid-cols-1 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <input type="text" placeholder="제목 (예: 보상하는 손해)" className="w-full border p-2 rounded-md text-sm" value={newPolicyBasis.title} onChange={e => setNewPolicyBasis({...newPolicyBasis, title: e.target.value})} />
+                            <textarea rows={2} className="w-full border p-2 rounded-md text-sm" placeholder="내용 입력..." value={newPolicyBasis.content} onChange={e => setNewPolicyBasis({...newPolicyBasis, content: e.target.value})} />
+                            <button type="button" onClick={() => {
+                              if (newPolicyBasis.title.trim() && newPolicyBasis.content.trim()) {
+                                updateReportField('liability.policyLiabilityBasis', [...(reportData.liability.policyLiabilityBasis || []), { ...newPolicyBasis }]);
+                                setNewPolicyBasis({ title: '', content: '' });
+                              }
+                            }} className="w-full py-2 bg-slate-800 text-white rounded-md text-xs font-bold hover:bg-black">추가</button>
+                          </div>
+                          <div className="space-y-1 mt-2">
+                            {(reportData.liability.policyLiabilityBasis || []).map((item, idx) => (
+                              <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 relative group">
+                                <button type="button" onClick={() => updateReportField('liability.policyLiabilityBasis', reportData.liability.policyLiabilityBasis.filter((_, i) => i !== idx))} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                <p className="text-xs font-black text-blue-600 mb-1">{item.title}</p>
+                                <p className="text-sm text-slate-600 whitespace-pre-wrap">{item.content}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 ml-1">법률상 지급책임</label>
+                          <div className="grid grid-cols-1 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <input type="text" placeholder="제목 (예: 민법 제750조)" className="w-full border p-2 rounded-md text-sm" value={newLegalBasis.title} onChange={e => setNewLegalBasis({...newLegalBasis, title: e.target.value})} />
+                            <textarea rows={2} className="w-full border p-2 rounded-md text-sm" placeholder="내용 입력..." value={newLegalBasis.content} onChange={e => setNewLegalBasis({...newLegalBasis, content: e.target.value})} />
+                            <button type="button" onClick={() => {
+                              if (newLegalBasis.title.trim() && newLegalBasis.content.trim()) {
+                                updateReportField('liability.legalLiabilityBasis', [...(reportData.liability.legalLiabilityBasis || []), { ...newLegalBasis }]);
+                                setNewLegalBasis({ title: '', content: '' });
+                              }
+                            }} className="w-full py-2 bg-slate-800 text-white rounded-md text-xs font-bold hover:bg-black">추가</button>
+                          </div>
+                          <div className="space-y-1 mt-2">
+                            {(reportData.liability.legalLiabilityBasis || []).map((item, idx) => (
+                              <div key={idx} className="p-3 bg-white rounded-xl border border-slate-100 relative group">
+                                <button type="button" onClick={() => updateReportField('liability.legalLiabilityBasis', reportData.liability.legalLiabilityBasis.filter((_, i) => i !== idx))} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                                <p className="text-xs font-black text-blue-600 mb-1">{item.title}</p>
+                                <p className="text-sm text-slate-600 whitespace-pre-wrap">{item.content}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {(reportData.reportType === 'liability' || reportData.reportType === 'auto') && <InputGroup label="피해자의 과실상계"><input type="text" value={reportData.liability.faultPercent} onChange={e => updateReportField('liability.faultPercent', e.target.value)} className="w-full border p-2 rounded-md" placeholder="%" /></InputGroup>}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 ml-1">보험사의 보험금 지급책임</label>
+                          
+                          {/* 문구 라이브러리 선택 */}
+                          <div className="flex gap-2 mb-2">
+                            <select 
+                              className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold outline-none"
+                              onChange={(e) => {
+                                const template = liabilityLibrary[e.target.value];
+                                if (template) setNewPayLiab(template);
+                              }}
+                              value=""
+                            >
+                              <option value="">자주 쓰는 문구 라이브러리 선택...</option>
+                              {liabilityLibrary.map((t, idx) => (
+                                <option key={idx} value={idx}>{t.title}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <input type="text" placeholder="제목 (예: 지급책임의 발생)" className="w-full border p-2 rounded-md text-sm" value={newPayLiab.title} onChange={e => setNewPayLiab({...newPayLiab, title: e.target.value})} />
+                            <textarea rows={3} placeholder="내용 입력..." className="w-full border p-2 rounded-md text-sm" value={newPayLiab.content} onChange={e => setNewPayLiab({...newPayLiab, content: e.target.value})} />
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => {
+                                if (newPayLiab.title.trim() && newPayLiab.content.trim()) {
+                                  updateReportField('liability.paymentLiability', [...(reportData.liability.paymentLiability || []), { ...newPayLiab }]);
+                                  setNewPayLiab({ title: '', content: '' });
+                                }
+                              }} className="flex-1 px-4 py-2 bg-slate-800 text-white rounded-md text-xs font-bold hover:bg-black">항목 추가</button>
+                              <button type="button" onClick={() => {
+                                if (newPayLiab.title.trim() && newPayLiab.content.trim()) {
+                                  setLiabilityLibrary(prev => [...prev, { ...newPayLiab }]);
+                                  alert("현재 문구가 라이브러리에 저장되었습니다.");
+                                }
+                              }} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-md text-xs font-bold hover:bg-indigo-100">라이브러리 저장</button>
+                              <button type="button" onClick={() => setNewPayLiab({ title: '', content: '' })} className="px-4 py-2 bg-slate-100 text-slate-500 rounded-md text-xs font-bold hover:bg-slate-200">초기화</button>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                      <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                        <div className="flex justify-between items-center font-bold text-slate-600 text-sm"><span>손해액 합계</span><span>₩{calcs.subTotal.toLocaleString()}</span></div>
-                        <div className="flex justify-between items-center font-bold text-rose-500 text-sm"><span>과실상계 ({reportData.liability.faultPercent}%)</span><span>- ₩{calcs.faultOffset.toLocaleString()}</span></div>
-                        <div className="flex justify-between items-center font-black text-indigo-600 pt-3 border-t border-slate-200 text-lg"><span>최종 사정금액</span><span>₩{calcs.finalPayment.toLocaleString()}</span></div>
-                      </div>
-                    </FormSection>
-
-                    <FormSection title={reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "보험금 지급책임 검토" : "손해배상책임 등 검토"} icon={Shield}>
-                      <div className="space-y-4">
-                        <InputGroup label={reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "보험금 지급책임 면/부책" : "피보험자 손해배상책임 면/부책"}><input type="text" value={reportData.liability.liabilityStatus} onChange={e => updateReportField('liability.liabilityStatus', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
-                        <InputGroup label="판단근거"><textarea rows={3} value={reportData.liability.judgmentBasis} onChange={e => updateReportField('liability.judgmentBasis', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
-                        <InputGroup label="법률근거"><textarea rows={2} value={reportData.liability.legalBasis} onChange={e => updateReportField('liability.legalBasis', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
-                        {(reportData.reportType === 'liability' || reportData.reportType === 'auto') && <InputGroup label="피해자의 과실상계"><input type="text" value={reportData.liability.faultPercent} onChange={e => updateReportField('liability.faultPercent', e.target.value)} className="w-full border p-2 rounded-md" placeholder="%" /></InputGroup>}
-                        <InputGroup label="보험금 지급책임"><textarea rows={2} value={reportData.liability.paymentResponsibility} onChange={e => updateReportField('liability.paymentResponsibility', e.target.value)} className="w-full border p-2 rounded-md text-sm" /></InputGroup>
+                          <div className="space-y-2 mt-2">
+                            {(reportData.liability.paymentLiability || []).map((item, idx) => (
+                              <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 relative group">
+                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                  <button type="button" onClick={() => {
+                                    if (idx > 0) {
+                                      const newList = [...reportData.liability.paymentLiability];
+                                      [newList[idx - 1], newList[idx]] = [newList[idx], newList[idx - 1]];
+                                      updateReportField('liability.paymentLiability', newList);
+                                    }
+                                  }} className="p-1 text-slate-400 hover:text-slate-600" title="위로"><ArrowUp size={14}/></button>
+                                  <button type="button" onClick={() => {
+                                    if (idx < reportData.liability.paymentLiability.length - 1) {
+                                      const newList = [...reportData.liability.paymentLiability];
+                                      [newList[idx + 1], newList[idx]] = [newList[idx], newList[idx + 1]];
+                                      updateReportField('liability.paymentLiability', newList);
+                                    }
+                                  }} className="p-1 text-slate-400 hover:text-slate-600" title="아래로"><ArrowDown size={14}/></button>
+                                  <button type="button" onClick={() => {
+                                    setNewPayLiab(item);
+                                    updateReportField('liability.paymentLiability', reportData.liability.paymentLiability.filter((_, i) => i !== idx));
+                                  }} className="p-1 text-blue-400 hover:text-blue-600" title="수정"><Edit2 size={14}/></button>
+                                  <button type="button" onClick={() => updateReportField('liability.paymentLiability', reportData.liability.paymentLiability.filter((_, i) => i !== idx))} className="p-1 text-red-400 hover:text-red-600" title="삭제"><Trash2 size={14}/></button>
+                                </div>
+                                <p className="text-xs font-black text-indigo-600 mb-1">{item.title}</p>
+                                <p className="text-sm text-slate-600 whitespace-pre-wrap">{item.content}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </FormSection>
                   </div>
                 </div>
               ) : (
                 /* 리포트 미리보기 */
-                <div id="print-area" className="bg-white p-12 shadow-2xl min-h-[29.7cm] mx-auto max-w-[21cm] border border-slate-200 print:shadow-none print:p-0 print:border-none print:m-0 font-serif">
-                  <div className="text-center mb-16 pt-20">
+                <div className="space-y-6">
+                  {/* 스타일 조절 툴바 */}
+                  <div className="flex flex-wrap items-center gap-6 bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm print:hidden animate-in slide-in-from-top-4 sticky top-0 z-50">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">정렬</span>
+                      <div className="flex bg-slate-100 p-1 rounded-xl">
+                        <button onClick={() => setReportStyles(prev => ({...prev, textAlign: 'left'}))} className={`p-2 rounded-lg transition-all ${reportStyles.textAlign === 'left' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="왼쪽 정렬"><AlignLeft size={18}/></button>
+                        <button onClick={() => setReportStyles(prev => ({...prev, textAlign: 'center'}))} className={`p-2 rounded-lg transition-all ${reportStyles.textAlign === 'center' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="가운데 정렬"><AlignCenter size={18}/></button>
+                        <button onClick={() => setReportStyles(prev => ({...prev, textAlign: 'justify'}))} className={`p-2 rounded-lg transition-all ${reportStyles.textAlign === 'justify' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="양쪽 정렬"><AlignJustify size={18}/></button>
+                      </div>
+                    </div>
+                    <div className="w-px h-8 bg-slate-200"></div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">줄 간격</span>
+                      <input type="range" min="1.0" max="3.0" step="0.1" value={reportStyles.lineHeight} onChange={e => setReportStyles(prev => ({...prev, lineHeight: e.target.value}))} className="w-32 accent-indigo-600 cursor-pointer" />
+                      <span className="text-sm font-black text-indigo-600 w-8">{reportStyles.lineHeight}</span>
+                    </div>
+                    <div className="w-px h-8 bg-slate-200"></div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">글자 크기</span>
+                      <select value={reportStyles.fontSize} onChange={e => setReportStyles(prev => ({...prev, fontSize: e.target.value}))} className="bg-slate-100 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
+                        {[10, 11, 12, 13, 14, 15, 16].map(size => <option key={size} value={size}>{size}pt</option>)}
+                      </select>
+                    </div>
+                    <div className="w-px h-8 bg-slate-200"></div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">문단 편집</span>
+                      <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                        <button 
+                          onClick={() => {
+                            if(!selectedElementId) return;
+                            setCustomStyles(prev => ({
+                              ...prev,
+                              [selectedElementId]: { ...prev[selectedElementId], bold: !prev[selectedElementId]?.bold }
+                            }));
+                          }}
+                          className={`p-2 rounded-lg transition-all ${customStyles[selectedElementId]?.bold ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                          title="굵게"
+                        >
+                          <Bold size={18}/>
+                        </button>
+                        <div className="relative group">
+                          <button className="p-2 rounded-lg text-slate-400 hover:text-slate-600 transition-all" title="색상">
+                            <Palette size={18}/>
+                          </button>
+                          <div className="absolute top-full left-0 mt-2 hidden group-hover:flex bg-white border border-slate-200 p-2 rounded-xl shadow-xl z-50 gap-1">
+                            {['#000000', '#ef4444', '#2563eb', '#059669', '#7c3aed'].map(color => (
+                              <button 
+                                key={color}
+                                onClick={() => {
+                                  if(!selectedElementId) return;
+                                  setCustomStyles(prev => ({
+                                    ...prev,
+                                    [selectedElementId]: { ...prev[selectedElementId], color }
+                                  }));
+                                }}
+                                className="w-6 h-6 rounded-full border border-slate-200"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => { setCustomStyles({}); setSelectedElementId(null); }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-red-500 transition-all"
+                          title="스타일 초기화"
+                        >
+                          <Eraser size={18}/>
+                        </button>
+                      </div>
+                      {selectedElementId && <span className="text-[10px] font-bold text-indigo-500 animate-pulse">문단 선택됨</span>}
+                    </div>
+                  </div>
+
+                  <div 
+                    id="print-area" 
+                    className="bg-white p-12 shadow-2xl min-h-[29.7cm] mx-auto max-w-[21cm] border border-slate-200 print:shadow-none print:p-0 print:border-none print:m-0"
+                    onClick={() => setSelectedElementId(null)}
+                    style={{ 
+                      textAlign: reportStyles.textAlign, 
+                      lineHeight: reportStyles.lineHeight,
+                      fontSize: `${reportStyles.fontSize}pt`,
+                      wordBreak: 'keep-all'
+                    }}
+                  >
+                  <div 
+                    className={`text-center mb-16 pt-20 transition-all ${selectedElementId === 'header' ? 'ring-2 ring-indigo-500 ring-inset rounded-xl' : ''}`} 
+                    onClick={(e) => { e.stopPropagation(); setSelectedElementId('header'); }} 
+                    style={{ color: customStyles['header']?.color || 'inherit', fontWeight: customStyles['header']?.bold ? 'bold' : 'normal' }}
+                  >
                     <div className="flex justify-end items-start mb-20 px-4"><span className="text-xs text-slate-400">사단법인 한국손해사정사회 정회원 양식</span></div>
-                    <h1 className="text-5xl font-extrabold tracking-[0.2em] mb-4">손 해 사 정 서</h1>
+                    <h1 className="text-5xl font-extrabold tracking-[0.2em] mb-4 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('reportTitle', e.target.innerText)}>손 해 사 정 서</h1>
                     <p className="text-slate-500 font-medium tracking-widest border-y border-slate-200 py-3 inline-block px-12 mb-32 uppercase">The Claim Adjustment Report</p>
                     <div className="max-w-md mx-auto text-left space-y-10 mt-20">
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Subject</p><p className="text-xl font-bold">피해자 {reportData.engagement.victim.name} 사고건</p></div>
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Date</p><p className="text-xl font-bold">{reportData.engagement.assignedDate}</p></div>
-                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Insurer</p><p className="text-xl font-bold">{reportData.policy.insurer}</p></div>
+                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Subject</p><p className="text-xl font-bold">피해자 <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.engagement.victim.name}</span> 사고건</p></div>
+                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Date</p><p className="text-xl font-bold" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.assignedDate', e.target.innerText)}>{reportData.engagement.assignedDate}</p></div>
+                      <div className="border-b-2 border-slate-900 pb-3"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Insurer</p><p className="text-xl font-bold" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerText)}>{reportData.policy.insurer}</p></div>
                     </div>
-                    <div className="mt-60 font-bold text-3xl">{reportData.company.name}</div>
+                    <div className="mt-60 font-bold text-3xl outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerText)}>{reportData.company.name}</div>
                   </div>
                   <div className="page-break h-2" />
                   <div className="py-10">
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3">1. 위임자 및 피해자 인적사항</h2>
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
                       <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center">위임자</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900">{reportData.engagement.mandator.name}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900">{reportData.engagement.mandator.birthDate}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900">{reportData.engagement.mandator.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900">{reportData.engagement.mandator.job}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.engagement.mandator.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.engagement.mandator.relation}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.name', e.target.innerText)}>{reportData.engagement.mandator.name}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.birthDate', e.target.innerText)}>{reportData.engagement.mandator.birthDate}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.phone', e.target.innerText)}>{reportData.engagement.mandator.phone}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.job', e.target.innerText)}>{reportData.engagement.mandator.job}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.address', e.target.innerText)}>{reportData.engagement.mandator.address}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.mandator.relation', e.target.innerText)}>{reportData.engagement.mandator.relation}</div>
 
                       <div className="bg-slate-100 p-3 border-b border-r border-slate-900 font-bold col-span-4 text-center">피해자(피보험자)</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900">{reportData.engagement.victim.name}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900">{reportData.engagement.victim.birthDate}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900">{reportData.engagement.victim.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900">{reportData.engagement.victim.job}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.engagement.victim.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.engagement.victim.relation}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">성명</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.name', e.target.innerText)}>{reportData.engagement.victim.name}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">생년월일</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.birthDate', e.target.innerText)}>{reportData.engagement.victim.birthDate}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.phone', e.target.innerText)}>{reportData.engagement.victim.phone}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">직업</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.job', e.target.innerText)}>{reportData.engagement.victim.job}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.address', e.target.innerText)}>{reportData.engagement.victim.address}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">관계</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('engagement.victim.relation', e.target.innerText)}>{reportData.engagement.victim.relation}</div>
                     </div>
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">2. 보험계약사항</h2>
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험회사</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.insurer}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험종목</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.item}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">증권번호</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.policyNo}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">계약자</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.contractor}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">피보험자</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.insured}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900">{reportData.policy.phone}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-r border-slate-900 col-span-3">{reportData.policy.address}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험기간</div><div className="p-3 border-b border-r border-slate-900 col-span-3">{reportData.policy.period}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보상한도/자부담</div><div className="p-3 border-b border-r border-slate-900 col-span-3">{reportData.policy.limitDeductible}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">담보내용</div><div className="p-3 border-b border-r border-slate-900 col-span-3">{reportData.policy.coverageDetails}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">기타사항</div><div className="p-3 border-b border-r border-slate-900 col-span-3">{reportData.policy.otherDetails}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험회사</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insurer', e.target.innerText)}>{reportData.policy.insurer}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험종목</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.item', e.target.innerText)}>{reportData.policy.item}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">증권번호</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.policyNo', e.target.innerText)}>{reportData.policy.policyNo}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">계약자</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.contractor', e.target.innerText)}>{reportData.policy.contractor}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">피보험자</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.insured', e.target.innerText)}>{reportData.policy.insured}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">연락처</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.phone', e.target.innerText)}>{reportData.policy.phone}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">주소</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.address', e.target.innerText)}>{reportData.policy.address}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보험기간</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.period', e.target.innerText)}>{reportData.policy.period}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">보상한도/자부담</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.limitDeductible', e.target.innerText)}>{reportData.policy.limitDeductible}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">담보내용</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.coverageDetails', e.target.innerText)}>{reportData.policy.coverageDetails}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">기타사항</div><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.otherDetails', e.target.innerText)}>{reportData.policy.otherDetails}</div>
                     </div>
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">3. 사고사항</h2>
                     <div className="border-t-2 border-slate-900 text-sm">
                       <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고개요</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed">{reportData.accident.overview}</div>
+                      <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.overview', e.target.innerText)}>{reportData.accident.overview}</div>
                       <div className="grid grid-cols-4">
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고일시</div><div className="p-3 border-b border-r border-slate-900">{reportData.accident.time}</div>
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고장소</div><div className="p-3 border-b border-slate-900">{reportData.accident.place}</div>
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고일시</div><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.time', e.target.innerText)}>{reportData.accident.time}</div>
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">사고장소</div><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.place', e.target.innerText)}>{reportData.accident.place}</div>
                       </div>
                       <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고원인</div>
-                      <div className="p-3 border-b border-slate-900">{reportData.accident.cause}</div>
+                      <div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.cause', e.target.innerText)}>{reportData.accident.cause}</div>
                       <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고내용</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed">{reportData.accident.details}</div>
+                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.details', e.target.innerText)}>{reportData.accident.details}</div>
                       <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold">사고발생관련사항(조사내용)</div>
-                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed">{reportData.accident.investigationDetails}</div>
+                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.investigationDetails', e.target.innerText)}>{reportData.accident.investigationDetails}</div>
                     </div>
                     <div className="page-break h-2" />
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">4. 손해내용</h2>
                     <div className="grid grid-cols-4 border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">병원명</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.damage.hospital}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">상병명</div><div className="p-3 border-b border-slate-900 col-span-3">{reportData.damage.diagnosis}</div>
-                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">치료내용</div><div className="p-3 border-b border-slate-900 col-span-3 min-h-[50px] whitespace-pre-wrap">{reportData.damage.treatment}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">병원명</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.hospital', e.target.innerText)}>{reportData.damage.hospital}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">상병명</div><div className="p-3 border-b border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.diagnosis', e.target.innerText)}>{reportData.damage.diagnosis}</div>
+                      <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold">치료내용</div><div className="p-3 border-b border-slate-900 col-span-3 min-h-[50px] whitespace-pre-wrap outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('damage.treatment', e.target.innerText)}>{reportData.damage.treatment}</div>
                     </div>
 
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">{reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "5. 보험금 지급책임 검토" : "5. 손해배상책임 등 검토"}</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16">{reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "5. 보험사의 보험금 지급책임 검토" : "5. 손해배상책임 등 검토"}</h2>
                     <div className="border-2 border-slate-200 p-6 space-y-6 text-sm">
-                      <div><h4 className="font-bold text-blue-800 mb-2">가. {reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "보험금 지급책임" : "피보험자 손해배상책임"} ({reportData.liability.liabilityStatus})</h4>
-                      <p className="leading-relaxed mb-2"><strong>판단근거:</strong> {reportData.liability.judgmentBasis}</p>
-                      <p className="leading-relaxed"><strong>법률근거:</strong> {reportData.liability.legalBasis}</p></div>
-                      {(reportData.reportType === 'liability' || reportData.reportType === 'auto') && <div><h4 className="font-bold text-amber-800 mb-2">나. 피해자의 과실상계 (과실 {reportData.liability.faultPercent}%)</h4></div>}
-                      <div><h4 className="font-bold text-slate-800 mb-2">{reportData.reportType === 'longTerm' || reportData.reportType === 'medical' ? "나. 검토 의견" : "다. 보험금 지급책임"}</h4><p className="leading-relaxed">{reportData.liability.paymentResponsibility}</p></div>
+                      <div>
+                        <h4 className="font-bold text-blue-800 mb-2">가. {reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임" : "피보험자 손해배상책임"} (<span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.liabilityStatus', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.liability.liabilityStatus}</span>)</h4>
+                        <div className="space-y-2">
+                          <p className="font-bold text-slate-700">1) 약관상 보험자 지급책임 근거</p>
+                          <div className="ml-5 space-y-2">
+                            {(reportData.liability.policyLiabilityBasis || []).map((item, idx) => (
+                              <div 
+                                key={idx} 
+                                className={`relative group/item transition-all ${selectedElementId === `policy-${idx}` ? 'ring-2 ring-indigo-500 ring-inset rounded-lg' : ''}`} 
+                                onClick={(e) => { e.stopPropagation(); setSelectedElementId(`policy-${idx}`); }} 
+                                style={{ 
+                                  color: customStyles[`policy-${idx}`]?.color || 'inherit', 
+                                  fontWeight: customStyles[`policy-${idx}`]?.bold ? 'bold' : 'normal' 
+                                }}
+                              >
+                                {typeof item === 'string' ? (
+                                  <p className="leading-relaxed">{item}</p>
+                                ) : (
+                                  <>
+                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span>]</p>
+                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.legalLiabilityBasis', idx, 'content', e.target.innerText)}>{item.content}</p>
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          <p className="font-bold text-slate-700 mt-2">2) 법률상 지급책임</p>
+                          <div className="ml-5 space-y-2">
+                            {(reportData.liability.legalLiabilityBasis || []).map((item, idx) => (
+                              <div 
+                                key={idx}
+                                className={`relative group/item transition-all ${selectedElementId === `legal-${idx}` ? 'ring-2 ring-indigo-500 ring-inset rounded-lg' : ''}`}
+                                onClick={(e) => { e.stopPropagation(); setSelectedElementId(`legal-${idx}`); }}
+                                style={{ 
+                                  color: customStyles[`legal-${idx}`]?.color || 'inherit', 
+                                  fontWeight: customStyles[`legal-${idx}`]?.bold ? 'bold' : 'normal' 
+                                }}
+                              >
+                                {typeof item === 'string' ? (
+                                  <p className="leading-relaxed">{item}</p>
+                                ) : (
+                                  <>
+                                    <p className="font-bold text-slate-600 text-xs">[<span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span>]</p>
+                                    <p className="leading-relaxed outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.policyLiabilityBasis', idx, 'content', e.target.innerText)}>{item.content}</p>
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {(reportData.reportType === 'liability' || reportData.reportType === 'auto') && (
+                        <div>
+                          <h4 className="font-bold text-amber-800 mb-2">나. 피해자의 과실상계 (과실 <span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('liability.faultPercent', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.liability.faultPercent}</span>%)</h4>
+                        </div>
+                      )}
+                      
+                      <div>
+                        <h4 className="font-bold text-slate-800 mb-2">{reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "나. 보험사의 보험금 지급책임" : "다. 보험사의 보험금 지급책임"}</h4>
+                        <div className="space-y-4">
+                          {(reportData.liability.paymentLiability || []).map((item, idx) => (
+                            <div 
+                              key={idx}
+                              className={`relative group/item transition-all ${selectedElementId === `pay-${idx}` ? 'ring-2 ring-indigo-500 ring-inset rounded-lg' : ''}`}
+                              onClick={(e) => { e.stopPropagation(); setSelectedElementId(`pay-${idx}`); }}
+                              style={{ 
+                                color: customStyles[`pay-${idx}`]?.color || 'inherit', 
+                                fontWeight: customStyles[`pay-${idx}`]?.bold ? 'bold' : 'normal' 
+                              }}
+                            >
+                              <p className="font-bold text-slate-700 mb-1">{idx + 1}. <span contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.paymentLiability', idx, 'title', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{item.title}</span></p>
+                              <p className="leading-relaxed whitespace-pre-wrap pl-2 outline-none focus:bg-blue-50 px-1 rounded" contentEditable suppressContentEditableWarning onBlur={e => updateReportListIndex('liability.paymentLiability', idx, 'content', e.target.innerText)}>{item.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="mt-32 text-right">
                       <p className="text-lg mb-10">위와 같이 정당하게 손해사정 하였음을 확인합니다.</p>
-                      <p className="text-2xl font-bold mb-2">{reportData.company.name}</p>
+                      <p className="text-2xl font-bold mb-2 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerText)}>{reportData.company.name}</p>
                       <div className="flex justify-end gap-12 mt-4">
                         <div className="text-left"><p className="text-xs text-slate-400">대표 손해사정사</p>
                         <div className="relative inline-block min-w-[100px]">
-                          <p className="font-bold text-lg">{reportData.company.repName} (인)</p>
+                          <p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.repName', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.company.repName}</span> (인)</p>
                           {(reportData.company.stampUrl || profile?.stampUrl) && (
                             <img 
                               key={`preview-${reportData.company.stampUrl || profile?.stampUrl}`}
@@ -1733,13 +2298,14 @@ const App = () => {
                             />
                           )}
                         </div>
-                        <p className="text-[10px]">{reportData.company.regNo}</p></div>
+                        <p className="text-[10px]" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.regNo', e.target.innerText)}>{reportData.company.regNo}</p></div>
                         {reportData.company.investigator && (
-                          <div className="text-left"><p className="text-xs text-slate-400">담당 조사자</p><p className="font-bold text-lg">{reportData.company.investigator} (서명)</p></div>
+                          <div className="text-left"><p className="text-xs text-slate-400">담당 조사자</p><p className="font-bold text-lg"><span contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.investigator', e.target.innerText)} className="outline-none focus:bg-blue-50 px-1 rounded">{reportData.company.investigator}</span> (서명)</p></div>
                         )}
                       </div>
                     </div>
                   </div>
+                </div>
                 </div>
               )}
             </div>
@@ -1784,7 +2350,7 @@ const App = () => {
                     <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">사고 및 피해자 기본 정보</h4>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">사고일시</label><input type="datetime-local" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.accidentDate} onChange={e=>{
+                    <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase px-1">사고일자</label><input type="date" className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs outline-none" value={standaloneCalc.accidentDate} onChange={e=>{
                       const months = calculateWorkMonths(standaloneCalc.birthDate, e.target.value);
                       const hCoeff = calculateHoffman(months);
                       setStandaloneCalc({...standaloneCalc, accidentDate: e.target.value, workMonths: months, hoffman: hCoeff});
@@ -1944,7 +2510,7 @@ const App = () => {
                                 <input type="number" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" value={standaloneCalc.nursingDays} onChange={e => setStandaloneCalc({...standaloneCalc, nursingDays: Number(e.target.value)})} />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400">적용 일당 (미입력 시 월소득/30)</label>
+                                <label className="text-[9px] font-bold text-slate-400">적용 일당 (미입력 시 월소득/25)</label>
                                 <input type="text" className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-black outline-none text-indigo-600" placeholder={formatComma(Math.floor(standaloneCalc.monthlyIncome / 25))} value={formatComma(standaloneCalc.nursingDailyWage)} onChange={e => setStandaloneCalc({...standaloneCalc, nursingDailyWage: unformatComma(e.target.value)})} />
                               </div>
                             </div>
@@ -2121,7 +2687,7 @@ const App = () => {
                         <div className="flex-1 w-full pt-8 md:pt-0 border-t md:border-t-0 md:border-l border-slate-800 md:pl-10 flex flex-col md:flex-row justify-between items-end gap-6">
                           <div>
                             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-2">최종 예상 배상금</p>
-                            <div className="text-5xl font-black text-indigo-400 tracking-tighter italic">₩{standaloneResult.finalPayment.toLocaleString()}</div>
+                            <div className="text-5xl font-black text-slate-900 tracking-tighter italic">₩{standaloneResult.finalPayment.toLocaleString()}</div>
                           </div>
                           <button onClick={() => { setStandaloneCalc({ 
                             medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0, roundingDeduction: 0, faultPercent: 0,
@@ -2142,7 +2708,7 @@ const App = () => {
               </div>
 
               {/* CALCULATOR PRINT AREA (Visible only on print) */}
-              <div id="calc-print-area" className="hidden print:block bg-white p-10 font-serif text-slate-900">
+              <div id="calc-print-area" className="hidden print:block bg-white p-10 font-sans text-slate-900">
                 <h1 className="text-3xl font-black text-center mb-10 underline decoration-double underline-offset-8">손해배상금 산출 내역서</h1>
                 
                 <section className="mb-8">
@@ -2185,7 +2751,7 @@ const App = () => {
                       {Object.entries(assessmentLabels).map(([key, label]) => (
                         <tr key={key}>
                           <td className="border border-slate-400 p-2 font-bold">{label}</td>
-                          <td className="border border-slate-400 p-2 text-xs text-slate-600">
+                          <td className="border border-slate-400 p-2 text-sm text-slate-600">
                             {key === 'lostWages' ? `(₩${formatComma(standaloneCalc.monthlyIncome)} / 30일) * ${standaloneCalc.lostWagesDays}일 * ${standaloneCalc.lostWagesMultiplier}` : 
                              key === 'lostEarnings' ? `(₩${formatComma(standaloneCalc.monthlyIncome)} * ${standaloneCalc.lossRate}% * ${standaloneCalc.hoffman})` : 
                              key === 'nursingExpenses' ? `${standaloneCalc.nursingDays}일 (상해 ${parseInt(standaloneCalc.injuryGrade?.toString().replace(/[^0-9]/g, ""))}급)` : 
@@ -2200,14 +2766,14 @@ const App = () => {
                       </tr>
                       <tr className="text-rose-600">
                         <td className="border border-slate-400 p-2 font-bold">과실상계</td>
-                        <td className="border border-slate-400 p-2 text-xs">
+                        <td className="border border-slate-400 p-2 text-sm">
                           ₩{formatComma(standaloneResult.subTotal)} * {standaloneCalc.faultPercent}%
                         </td>
                         <td className="border border-slate-400 p-2 text-right">- ₩{formatComma(standaloneResult.faultOffset)}</td>
                       </tr>
                       <tr className="text-rose-600">
                         <td className="border border-slate-400 p-2 font-bold">절사 금액</td>
-                        <td className="border border-slate-400 p-2 text-xs">-</td>
+                        <td className="border border-slate-400 p-2 text-sm">-</td>
                         <td className="border border-slate-400 p-2 text-right">- ₩{formatComma(standaloneCalc.roundingDeduction)}</td>
                       </tr>
                       <tr className="bg-slate-900 text-white font-black text-lg">
@@ -2234,7 +2800,23 @@ const App = () => {
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto font-sans">
           <div className="bg-white rounded-[3rem] w-full max-w-6xl shadow-2xl overflow-hidden animate-in zoom-in duration-300">
             <div className="px-10 py-6 border-b flex justify-between items-center bg-slate-50/50">
-              <h3 className="text-xl font-black text-slate-800 tracking-tighter italic underline decoration-indigo-500 decoration-4 underline-offset-8 uppercase">사건 정보 마스터 관리</h3>
+              <div className="flex items-center gap-6">
+                <h3 className="text-xl font-black text-slate-800 tracking-tighter italic underline decoration-indigo-500 decoration-4 underline-offset-8 uppercase">사건 정보 마스터 관리</h3>
+                <div className="flex gap-2 ml-4">
+                  <button 
+                    onClick={() => { startReport(editingCase); setIsModalOpen(false); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-black hover:bg-blue-100 transition-all border border-blue-100"
+                  >
+                    <FileEdit size={14}/> 손해사정서 작성
+                  </button>
+                  <button 
+                    onClick={() => { setSelectedCalcCaseId(editingCase.id); setView('calculator'); setIsModalOpen(false); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-black hover:bg-indigo-100 transition-all border border-indigo-100"
+                  >
+                    <Calculator size={14}/> 손해배상금 산출
+                  </button>
+                </div>
+              </div>
               <button onClick={()=>setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={24}/></button>
             </div>
             
@@ -2250,6 +2832,14 @@ const App = () => {
                       <input type="text" placeholder="의뢰인" className="w-1/2 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.clientName || ''} onChange={e=>setEditingCase(prev=>({...prev, clientName: e.target.value}))}/>
                     </div></div>
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">사고 / 진단일자</label><input type="date" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.incidentDiagnosisDate || ''} onChange={e=>setEditingCase(prev=>({...prev, incidentDiagnosisDate: e.target.value}))}/></div>
+                    
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">생년월일</label><input type="date" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.birthDate || ''} onChange={e=>setEditingCase(prev=>({...prev, birthDate: e.target.value}))}/></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">직업</label><input type="text" placeholder="직업" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.occupation || ''} onChange={e=>setEditingCase(prev=>({...prev, occupation: e.target.value}))}/></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">치료병원</label><input type="text" placeholder="치료병원" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.treatmentHospital || ''} onChange={e=>setEditingCase(prev=>({...prev, treatmentHospital: e.target.value}))}/></div>
+
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">상해급수</label><input type="text" placeholder="상해급수" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.injuryGrade || ''} onChange={e=>setEditingCase(prev=>({...prev, injuryGrade: e.target.value}))}/></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">초진주수 (주)</label><input type="number" placeholder="주수" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.initialWeeks || ''} onChange={e=>setEditingCase(prev=>({...prev, initialWeeks: e.target.value}))}/></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">장해등급</label><input type="text" placeholder="장해등급" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.disabilityGrade || ''} onChange={e=>setEditingCase(prev=>({...prev, disabilityGrade: e.target.value}))}/></div>
                   </div>
                   {/* 진단명 (+) */}
                   <div className="space-y-2">
@@ -2266,11 +2856,50 @@ const App = () => {
                       ))}
                     </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-5">
                     <input type="text" placeholder="연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingCase?.phone || ''} onChange={e=>setEditingCase(prev=>({...prev, phone: e.target.value}))}/>
                     <div className="flex gap-2">
                         <input type="text" placeholder="상세 주소" value={editingCase?.address || ''} readOnly className="flex-1 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm" />
                         <button type="button" onClick={() => handleOpenAddr(addr => setEditingCase(prev=>({...prev, address: addr})))} className="px-6 bg-slate-900 text-white rounded-2xl text-[10px] font-black hover:bg-black flex items-center gap-2"><MapIcon size={14}/> FIND</button>
+                    </div>
+                  </div>
+
+                  {/* 첨부 파일 섹션 */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">첨부 서류 (진단서, 보험증권, 결과지 등)</label>
+                    <div className="flex items-center justify-center w-full">
+                      <label
+                        className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all ${isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'} ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+                        onDragOver={(e) => { if (!isUploading) { e.preventDefault(); setIsDragging(true); } }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={(e) => !isUploading && handleDrop(e)}
+                      >
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                          {isUploading ? (
+                            <Loader2 className="w-8 h-8 mb-3 text-indigo-500 animate-spin" />
+                          ) : (
+                            <CloudUpload className={`w-8 h-8 mb-3 ${isDragging ? 'text-indigo-500' : 'text-slate-400'}`} />
+                          )}
+                          <p className="mb-2 text-xs text-slate-500 font-bold">{isUploading ? '파일 업로드 중...' : '클릭하거나 파일을 드래그하여 업로드'}</p>
+                          <p className="text-[10px] text-slate-400">JPG, PNG, PDF, HWP (최대 10MB)</p>
+                        </div>
+                        <input type="file" className="hidden" multiple onChange={handleFileUpload} accept="image/*,.pdf,.hwp,.hwpx" disabled={isUploading} />
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                      {(editingCase?.attachments || []).map((file, i) => (
+                        <div key={i} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm group">
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <Paperclip size={14} className="text-indigo-500 shrink-0" />
+                            <span className="text-xs font-bold text-slate-600 truncate">{file.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <a href={file.url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors"><ExternalLink size={14} /></a>
+                            <button type="button" onClick={() => setEditingCase(prev => ({ ...prev, attachments: prev.attachments.filter((_, idx) => idx !== i) }))} className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </section>
@@ -2291,7 +2920,8 @@ const App = () => {
                         <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">보험종목 / 보험사명</label>
                         <div className="flex gap-2">
                           <select className="w-1/3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.insuranceType || '자동차보험'} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], insuranceType: val}; return {...prev, insurances: newArr};})}}>
-                            <option>자동차보험</option><option>배상책임</option><option>실손보험</option><option>장기보험</option>
+                            <option>자동차보험</option><option>배상책임</option><option>실손보험</option>
+                            <option>장기보험(질병)</option><option>장기보험(상해)</option>
                             <option>선임권(배책)</option><option>선임권(실손)</option>
                           </select>
                           <input type="text" placeholder="보험사명" className="w-2/3 bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.insuranceCompany || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], insuranceCompany: val}; return {...prev, insurances: newArr};})}}/>
@@ -2448,6 +3078,52 @@ const App = () => {
         </div>
       )}
 
+      {/* 상담일지 등록/수정 모달 */}
+      {isConsultationModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 z-[100] font-sans">
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+            <div className="px-10 py-6 border-b flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-xl font-black text-slate-800 tracking-tighter italic">상담일지 작성</h3>
+              <button onClick={()=>setIsConsultationModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={24}/></button>
+            </div>
+            <div className="p-10 space-y-6">
+              <div className="grid grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">상담일자</label>
+                  <input type="date" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingConsultation?.date || ''} onChange={e=>setEditingConsultation({...editingConsultation, date: e.target.value})}/>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">상태</label>
+                  <select className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingConsultation?.status || '상담중'} onChange={e=>setEditingConsultation({...editingConsultation, status: e.target.value})}>
+                    <option>상담중</option>
+                    <option>상담완료</option>
+                    <option>사건전환</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">고객명</label>
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingConsultation?.clientName || ''} onChange={e=>setEditingConsultation({...editingConsultation, clientName: e.target.value})}/>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">연락처</label>
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={editingConsultation?.phone || ''} onChange={e=>setEditingConsultation({...editingConsultation, phone: e.target.value})}/>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">상담 내용</label>
+                <textarea rows={6} className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none resize-none" value={editingConsultation?.content || ''} onChange={e=>setEditingConsultation({...editingConsultation, content: e.target.value})}/>
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button onClick={()=>setIsConsultationModalOpen(false)} className="flex-1 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-500 hover:bg-slate-100 transition-all">취소</button>
+                <button onClick={()=>handleSaveConsultation(editingConsultation)} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all">상담 내용 저장</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 계산기 모달 */}
       {activeCalcField && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
@@ -2573,8 +3249,23 @@ const App = () => {
           aside, header, .print\\:hidden { display: none !important; }
           main { overflow: visible !important; height: auto !important; }
           .print\\:p-0 { padding: 0 !important; }
-          #print-area, #calc-print-area { position: absolute; left: 0; top: 0; width: 100%; border: none !important; box-shadow: none !important; z-index: 9999; }
+          #print-area, #calc-print-area { position: absolute; left: 0; top: 0; width: 100%; border: none !important; box-shadow: none !important; z-index: 9999; font-variant-numeric: tabular-nums; }
           .page-break { page-break-before: always; height: 1px; }
+        }
+        #print-area {
+          font-family: 'GulimChe', '굴림체', 'Gulim', '굴림', sans-serif !important;
+        }
+        #print-area .text-sm, 
+        #print-area .leading-relaxed {
+          font-size: inherit !important;
+        }
+        #print-area [contenteditable="true"]:hover {
+          background-color: #f8fafc;
+          cursor: text;
+        }
+        #print-area [contenteditable="true"]:focus {
+          background-color: #f1f5f9;
+          outline: none;
         }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
