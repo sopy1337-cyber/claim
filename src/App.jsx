@@ -6,7 +6,7 @@ import {
   FileSearch, Printer, Copy, FileCheck, AlertCircle, Map as MapIcon, KeyRound,
   ArrowLeft, PlusSquare, MinusCircle, FileEdit, CloudUpload, Calendar, ChevronLeft, MessageSquare, ArrowUp, ArrowDown, AlignLeft, AlignCenter, AlignJustify, Bold, Palette, Eraser,
   Paperclip, ExternalLink, Users,
-  User, Shield, Calculator, Landmark, PenTool
+  User, Shield, Calculator, Landmark, PenTool, Underline
 } from 'lucide-react';
 
 // Firebase SDK
@@ -331,7 +331,8 @@ const App = () => {
     },
     policy: {
       insurer: "", item: "", productName: "", policyNo: "", contractor: "", insured: "",
-      address: "", phone: "", period: "", limitDeductible: "", coverageDetails: "", otherDetails: ""
+      address: "", phone: "", period: "", limitDeductible: "", coverageDetails: "", otherDetails: "",
+      termsContent: "", attachments: []
     },
     accident: {
       overview: "", time: "", place: "", cause: "", details: "", investigationDetails: ""
@@ -1129,7 +1130,9 @@ const App = () => {
           policyNo: caseData.insurances?.[0]?.policyNumber || "",
           contractor: caseData.contractor || "",
           insured: caseData.clientName || "",
-          address: "", phone: "", period: "", limitDeductible: "", coverageDetails: caseData.insurances?.[0]?.coverageName || "", otherDetails: ""
+          address: "", phone: "", period: "", limitDeductible: "", coverageDetails: caseData.insurances?.[0]?.coverageName || "", otherDetails: "",
+          termsContent: caseData.reportData?.policy?.termsContent || "",
+          attachments: caseData.reportData?.policy?.attachments || []
         },
         accident: {
           overview: "",
@@ -1167,7 +1170,8 @@ const App = () => {
         },
         policy: {
           insurer: "", item: "", productName: "", policyNo: "", contractor: "", insured: "",
-          address: "", phone: "", period: "", limitDeductible: "", coverageDetails: "", otherDetails: ""
+          address: "", phone: "", period: "", limitDeductible: "", coverageDetails: "", otherDetails: "",
+          termsContent: "", attachments: []
         },
         accident: { overview: "", time: "", place: "", cause: "", details: "", investigationDetails: "" },
         damage: { hospital: "", diagnosis: "", treatment: "" },
@@ -1974,14 +1978,16 @@ const App = () => {
                           <InputGroup label="사고개요"><input type="text" value={reportData.accident.overview} onChange={e => updateReportField('accident.overview', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
                         )}
                         <div className="grid grid-cols-2 gap-4">
-                          <InputGroup label={reportData.reportType === 'longTermDisease' ? "진단일" : "사고일시"}>
+                          <InputGroup label={reportData.reportType === 'longTermDisease' ? "진단일시" : "사고일시"}>
                             <input type={reportData.reportType === 'longTermDisease' ? "date" : "datetime-local"} value={reportData.accident.time} onChange={e => updateReportField('accident.time', e.target.value)} className="w-full border p-2 rounded-md" />
                           </InputGroup>
                           <InputGroup label={reportData.reportType === 'longTermDisease' ? "치료병원" : "사고장소"}>
                             <input type="text" value={reportData.accident.place} onChange={e => updateReportField('accident.place', e.target.value)} className="w-full border p-2 rounded-md" />
                           </InputGroup>
                         </div>
-                        <InputGroup label="사고원인"><input type="text" value={reportData.accident.cause} onChange={e => updateReportField('accident.cause', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                        {reportData.reportType !== 'longTermDisease' && (
+                          <InputGroup label="사고원인"><input type="text" value={reportData.accident.cause} onChange={e => updateReportField('accident.cause', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
+                        )}
                         <InputGroup label={reportData.reportType === 'longTermDisease' ? "치료내용" : "사고내용"}>
                           <RichTextEditor value={reportData.accident.details} onChange={val => updateReportField('accident.details', val)} />
                         </InputGroup>
@@ -2160,7 +2166,10 @@ const App = () => {
                   <div 
                     onMouseEnter={() => {
                       const sel = window.getSelection();
-                      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) previewSavedRange.current = sel.getRangeAt(0);
+                      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                        // 툴바 진입 시 현재 선택 영역이 있다면 안전하게 복제하여 저장
+                        previewSavedRange.current = sel.getRangeAt(0).cloneRange();
+                      }
                     }}
                     className="w-full max-w-[21cm] flex flex-wrap items-center gap-6 bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm print:hidden animate-in slide-in-from-top-4 sticky top-0 z-50"
                   >
@@ -2247,7 +2256,7 @@ const App = () => {
                       <select 
                         onMouseDown={() => {
                           const sel = window.getSelection();
-                          if (sel.rangeCount > 0 && !sel.isCollapsed) {
+                          if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
                             previewSavedRange.current = sel.getRangeAt(0).cloneRange();
                           }
                         }}
@@ -2285,14 +2294,13 @@ const App = () => {
                           document.execCommand('styleWithCSS', null, false);
                           document.execCommand('fontSize', false, '7');
                           if (editable) {
-                            const fontEls = editable.querySelectorAll('font[size="7"]');
+                            const fontEls = editable.querySelectorAll('font[size="7"], font[size="+4"], span[style*="xxx-large"]');
                             fontEls.forEach(el => {
-                              el.removeAttribute('size');
+                              if (el.tagName === 'FONT') el.removeAttribute('size');
                               el.style.fontSize = size;
                             });
                           }
 
-                          previewSavedRange.current = null;
                           e.target.value = ""; 
                           e.target.blur(); // 드롭다운 포커스 해제
                         }} 
@@ -2312,11 +2320,47 @@ const App = () => {
                       <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
                         <button 
                           onMouseDown={e => e.preventDefault()}
-                          onClick={() => document.execCommand('bold')}
+                          onClick={() => {
+                            const sel = window.getSelection();
+                            const range = previewSavedRange.current || (sel.rangeCount > 0 ? sel.getRangeAt(0) : null);
+                            if (range) {
+                              let node = range.startContainer;
+                              while (node && node.nodeType !== 1 && node.parentNode) node = node.parentNode;
+                              const editable = node ? node.closest('[contenteditable="true"]') : null;
+                              if (editable) {
+                                editable.focus();
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                                document.execCommand('bold');
+                              }
+                            }
+                          }}
                           className={`p-2 rounded-lg transition-all ${customStyles[selectedElementId]?.bold ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                           title="굵게"
                         >
                           <Bold size={18}/>
+                        </button>
+                        <button 
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => {
+                            const sel = window.getSelection();
+                            const range = previewSavedRange.current || (sel.rangeCount > 0 ? sel.getRangeAt(0) : null);
+                            if (range) {
+                              let node = range.startContainer;
+                              while (node && node.nodeType !== 1 && node.parentNode) node = node.parentNode;
+                              const editable = node ? node.closest('[contenteditable="true"]') : null;
+                              if (editable) {
+                                editable.focus();
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                                document.execCommand('underline');
+                              }
+                            }
+                          }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
+                          title="밑줄"
+                        >
+                          <Underline size={18}/>
                         </button>
                         <div className="relative group">
                           <button className="p-2 rounded-lg text-slate-400 hover:text-slate-600 transition-all" title="색상">
@@ -2355,6 +2399,20 @@ const App = () => {
                     id="print-area" 
                     className="bg-white p-12 shadow-2xl min-h-[29.7cm] mx-auto max-w-[21cm] border border-slate-200 print:shadow-none print:p-0 print:border-none print:m-0"
                     onClick={() => setSelectedElementId(null)}
+                    onMouseUp={() => {
+                      // 본문에서 드래그가 끝날 때마다 선택 영역을 즉시 저장
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                        previewSavedRange.current = sel.getRangeAt(0).cloneRange();
+                      }
+                    }}
+                    onKeyUp={() => {
+                      // 키보드(Shift+방향키 등)로 선택 영역을 변경할 때도 저장
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                        previewSavedRange.current = sel.getRangeAt(0).cloneRange();
+                      }
+                    }}
                     style={{ 
                       lineHeight: reportStyles.lineHeight,
                       fontSize: '11pt',
@@ -2437,20 +2495,39 @@ const App = () => {
                       <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.coverage', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.coverage || "담보내용" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.coverageDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.coverageDetails }} />
                       <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.other', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.other || "기타사항" }} /><div className="p-3 border-b border-r border-slate-900 col-span-3 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.otherDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.otherDetails }} />
                     </div>
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section3', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section3 || "3. 사고사항" }} />
-                    <div className="border-t-2 border-slate-900 text-sm">
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.overview || "사고개요" }} />
-                      <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.overview }} />
-                      <div className="grid grid-cols-4">
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.time || "사고일시" }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.time }} />
-                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.place || "사고장소" }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.place }} />
+                    {reportData.policy.termsContent && (
+                      <div className="mt-4 border border-slate-300 rounded-lg overflow-hidden">
+                        <div className="bg-slate-50 p-2 border-b border-slate-300 text-xs font-bold text-slate-600">약관 주요 내용</div>
+                        <div className="p-4 text-sm leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('policy.termsContent', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.policy.termsContent }} />
                       </div>
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.cause || "사고원인" }} />
-                      <div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.cause }} />
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.details', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.details || "사고내용" }} />
+                    )}
+
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section3', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section3 || (reportData.reportType === 'longTermDisease' ? "3. 보험사고사항" : "3. 사고사항") }} />
+                    <div className="border-t-2 border-slate-900 text-sm">
+                      {reportData.reportType !== 'longTermDisease' && (
+                        <>
+                          <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.overview || "사고개요" }} />
+                          <div className="p-4 border-b border-slate-900 min-h-[50px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.overview', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.overview }} />
+                        </>
+                      )}
+                      <div className="grid grid-cols-4">
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.time || (reportData.reportType === 'longTermDisease' ? "진단일시" : "사고일시") }} /><div className="p-3 border-b border-r border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.time', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.time }} />
+                        <div className="bg-slate-50 p-3 border-b border-r border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.place || (reportData.reportType === 'longTermDisease' ? "치료병원" : "사고장소") }} /><div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.place', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.place }} />
+                      </div>
+                      {reportData.reportType !== 'longTermDisease' && (
+                        <>
+                          <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.cause || "사고원인" }} />
+                          <div className="p-3 border-b border-slate-900 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.cause', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.cause }} />
+                        </>
+                      )}
+                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.details', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.details || (reportData.reportType === 'longTermDisease' ? "치료내용" : "사고내용") }} />
                       <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.details', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.details }} />
-                      <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.investigation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.investigation || "사고발생관련사항(조사내용)" }} />
-                      <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.investigationDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.investigationDetails }} />
+                      {reportData.reportType !== 'longTermDisease' && (
+                        <>
+                          <div className="bg-slate-50 p-3 border-b border-slate-900 font-bold outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.investigation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.investigation || "사고발생관련사항(조사내용)" }} />
+                          <div className="p-4 border-b border-slate-900 min-h-[100px] whitespace-pre-wrap leading-relaxed outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('accident.investigationDetails', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.accident.investigationDetails }} />
+                        </>
+                      )}
                     </div>
                     <div className="page-break h-2" />
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.section4', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.section4 || "4. 손해내용" }} />
@@ -3201,12 +3278,24 @@ const App = () => {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-5">
-                      <input type="text" placeholder="상품명" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.productName || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], productName: val}; return {...prev, insurances: newArr};})}}/>
-                      <input type="text" placeholder="담보명" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.coverageName || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], coverageName: val}; return {...prev, insurances: newArr};})}}/>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">상품명</label>
+                        <input type="text" placeholder="상품명" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.productName || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], productName: val}; return {...prev, insurances: newArr};})}}/>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">담보명</label>
+                        <input type="text" placeholder="담보명" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.coverageName || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], coverageName: val}; return {...prev, insurances: newArr};})}}/>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-5">
-                      <input type="text" placeholder="심사자 성함 / 연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.reviewerInfo || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], reviewerInfo: val}; return {...prev, insurances: newArr};})}}/>
-                      <input type="text" placeholder="조사자 성함 / 연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.investigatorInfo || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], investigatorInfo: val}; return {...prev, insurances: newArr};})}}/>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">심사자 성함 / 연락처</label>
+                        <input type="text" placeholder="심사자 성함 / 연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.reviewerInfo || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], reviewerInfo: val}; return {...prev, insurances: newArr};})}}/>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase px-2 tracking-widest">조사자 성함 / 연락처</label>
+                        <input type="text" placeholder="조사자 성함 / 연락처" className="w-full bg-slate-50 border border-slate-200 px-5 py-3 rounded-2xl font-bold text-sm outline-none" value={ins.investigatorInfo || ''} onChange={e=>{const val=e.target.value; setEditingCase(prev=>{const newArr=[...prev.insurances]; newArr[idx]={...newArr[idx], investigatorInfo: val}; return {...prev, insurances: newArr};})}}/>
+                      </div>
                     </div>
                     <div className="space-y-3 pt-2 border-t border-dashed border-slate-200">
                         <div className="flex items-center gap-2"><h5 className="text-xs font-black text-slate-500 uppercase tracking-tight">담보별 예상 지급액</h5></div>
