@@ -344,9 +344,11 @@ const App = () => {
       liabilityStatus: "", policyLiabilityBasis: [], legalLiabilityBasis: [], faultPercent: 0, paymentLiability: []
     },
     assessment: {
-      medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0
+      medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0,
+      roundingDeduction: 0
     },
     assessmentDetails: {}, // 상세 산출 내역 저장
+    calcMetadata: {},
     processLogs: [],
     fees: { basic: 0, mileage: 0, fuelPrice: 0, efficiency: 0, toll: 0, misc: 0, daily: 0 },
     bankInfo: { accountHolder: "", birthDate: "", bankName: "", accountNumber: "" }
@@ -596,12 +598,12 @@ const App = () => {
 
   // --- 리포트 자동 계산 ---
   const calcs = useMemo(() => {
-    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, nursingExpenses, transportationExpenses, alimony, otherDamages } = reportData.assessment;
+    const { medicalExpenses, futureMedicalExpenses, lostWages, lostEarnings, nursingExpenses, transportationExpenses, alimony, otherDamages, roundingDeduction } = reportData.assessment;
     const subTotal = (Number(medicalExpenses)||0) + (Number(futureMedicalExpenses)||0) + (Number(lostWages)||0) + (Number(lostEarnings)||0) + (Number(nursingExpenses)||0) + (Number(transportationExpenses)||0) + (Number(alimony)||0) + (Number(otherDamages)||0);
     // 장기/실손 보험은 과실상계 미적용
     const fault = (reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical') ? 0 : (Number(reportData.liability.faultPercent) || 0);
     const faultOffset = Math.floor(subTotal * (fault / 100));
-    const finalPayment = subTotal - faultOffset;
+    const finalPayment = subTotal - faultOffset - (Number(roundingDeduction) || 0);
     
     const transFee = Math.floor(((Number(reportData.fees.mileage)||0) * (Number(reportData.fees.fuelPrice)||0) / (Number(reportData.fees.efficiency)||1)) + (Number(reportData.fees.toll)||0));
     const totalFees = (Number(reportData.fees.basic)||0) + transFee + (Number(reportData.fees.misc)||0) + (Number(reportData.fees.daily)||0);
@@ -1158,6 +1160,47 @@ const App = () => {
     setReportTab('input');
   };
 
+  const handleImportCalcData = () => {
+    if (!selectedCaseForReport || !selectedCaseForReport.standaloneCalcData) {
+      alert("저장된 산출 내역이 없습니다. '손해배상금 산출' 메뉴에서 먼저 계산 후 저장해주세요.");
+      return;
+    }
+    const calcData = selectedCaseForReport.standaloneCalcData;
+    setReportData(prev => ({
+      ...prev,
+      engagement: {
+        ...prev.engagement,
+        victim: {
+          ...prev.engagement.victim,
+          birthDate: calcData.birthDate || prev.engagement.victim.birthDate,
+          name: calcData.victimName || prev.engagement.victim.name
+        }
+      },
+      accident: {
+        ...prev.accident,
+        time: calcData.accidentDate ? (calcData.accidentDate.includes('T') ? calcData.accidentDate : `${calcData.accidentDate}T00:00`) : prev.accident.time
+      },
+      liability: {
+        ...prev.liability,
+        faultPercent: calcData.faultPercent || 0
+      },
+      assessment: {
+        medicalExpenses: calcData.medicalExpenses || 0,
+        futureMedicalExpenses: calcData.futureMedicalExpenses || 0,
+        lostWages: calcData.lostWages || 0,
+        lostEarnings: calcData.lostEarnings || 0,
+        nursingExpenses: calcData.nursingExpenses || 0,
+        transportationExpenses: calcData.transportationExpenses || 0,
+        alimony: calcData.alimony || 0,
+        otherDamages: calcData.otherDamages || 0,
+        roundingDeduction: calcData.roundingDeduction || 0
+      },
+      assessmentDetails: calcData.assessmentDetails || {},
+      calcMetadata: { ...calcData }
+    }));
+    alert("산출 내역을 불러왔습니다.");
+  };
+
   const handleNewReport = () => {
     setSelectedCaseForReport({ clientName: '', insuranceCompany: '' });
     setReportData({
@@ -1176,8 +1219,9 @@ const App = () => {
         accident: { overview: "", time: "", place: "", cause: "", details: "", investigationDetails: "" },
         damage: { hospital: "", diagnosis: "", treatment: "" },
         liability: { liabilityStatus: "", judgmentBasis: "", legalBasis: "", faultPercent: 0, paymentResponsibility: "" },
-          assessment: { medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0 },
+          assessment: { medicalExpenses: 0, futureMedicalExpenses: 0, lostWages: 0, lostEarnings: 0, nursingExpenses: 0, transportationExpenses: 0, alimony: 0, otherDamages: 0, roundingDeduction: 0 },
         assessmentDetails: {},
+        calcMetadata: {},
         processLogs: [], fees: { basic: 0, mileage: 0, fuelPrice: 0, efficiency: 0, toll: 0, misc: 0, daily: 0 },
         bankInfo: { accountHolder: "", birthDate: "", bankName: "", accountNumber: "" }
     });
@@ -1878,6 +1922,11 @@ const App = () => {
                           <button onClick={handleLoadReportCase} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-black transition-all flex items-center gap-2">
                             <History size={14}/> 불러오기
                           </button>
+                          {selectedCaseForReport?.id && (
+                            <button onClick={handleImportCalcData} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-all flex items-center gap-2 border border-indigo-100">
+                              <Calculator size={14}/> 산출 내역 불러오기
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="w-px h-10 bg-slate-200 hidden md:block"></div>
@@ -2007,36 +2056,31 @@ const App = () => {
                       </FormSection>
                     )}
 
-                    {!reportData.reportType?.startsWith('longTerm') && (
-                      <FormSection title="손해액 산정" icon={Calculator}>
-                        <div className="grid grid-cols-2 gap-6">
-                          {Object.entries(assessmentLabels).map(([key, label]) => (
-                            <div key={key} className="space-y-1">
-                              <div className="flex justify-between items-center px-1">
-                                <label className="text-xs font-bold text-slate-500">{label}</label>
-                                <button onClick={() => setActiveCalcField(key)} className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-[10px] font-bold">
-                                  <Calculator size={12}/> 상세계산
-                                </button>
-                              </div>
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
-                                <input 
-                                  type="text" 
-                                  className="w-full pl-8 pr-3 py-2 border rounded-md text-sm font-bold text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                  value={formatComma(reportData.assessment[key])}
-                                  onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
-                                />
-                              </div>
+                    <FormSection title="손해액 산정" icon={Calculator}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {Object.entries(assessmentLabels).map(([key, label]) => (
+                          <div key={key} className="space-y-1">
+                            <div className="flex justify-between items-center px-1">
+                              <label className="text-xs font-bold text-slate-500">{label}</label>
+                              <button type="button" onClick={() => setActiveCalcField(key)} className="text-[10px] text-blue-600 font-bold hover:underline">상세 산출</button>
                             </div>
-                          ))}
-                        </div>
-                        <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                          <div className="flex justify-between items-center font-bold text-slate-600 text-sm"><span>손해액 합계</span><span>₩{calcs.subTotal.toLocaleString()}</span></div>
-                          <div className="flex justify-between items-center font-bold text-rose-500 text-sm"><span>과실상계 ({reportData.liability.faultPercent}%)</span><span>- ₩{calcs.faultOffset.toLocaleString()}</span></div>
-                          <div className="flex justify-between items-center font-black text-indigo-600 pt-3 border-t border-slate-200 text-lg"><span>최종 사정금액</span><span>₩{calcs.finalPayment.toLocaleString()}</span></div>
-                        </div>
-                      </FormSection>
-                    )}
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
+                              <input 
+                                type="text" 
+                                className="w-full pl-8 pr-3 py-2 border rounded-md font-mono text-sm text-right"
+                                value={formatComma(reportData.assessment[key] || 0)}
+                                onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-8 p-4 bg-slate-900 rounded-xl text-white flex justify-between items-center">
+                        <span className="font-bold">최종 산정액 합계</span>
+                        <span className="text-xl font-black italic">₩{calcs.finalPayment.toLocaleString()}</span>
+                      </div>
+                    </FormSection>
 
                     <FormSection title={reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임 검토" : "손해배상책임 등 검토"} icon={Shield}>
                       <div className="space-y-4">
@@ -2622,6 +2666,74 @@ const App = () => {
                         </div>
                       </div>
                     </div>
+
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.sectionAssessment', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.sectionAssessment || "6. 손해액 산정 내역" }} />
+                    <div className="border-t-2 border-slate-900">
+                      <table className="w-full border-collapse text-sm">
+                        <thead>
+                          <tr className="bg-slate-50">
+                            <th className="border border-slate-300 p-2 text-left w-1/4">항목</th>
+                            <th className="border border-slate-300 p-2 text-left">산식 및 근거</th>
+                            <th className="border border-slate-300 p-2 text-right">산정금액</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(assessmentLabels).map(([key, label]) => {
+                            const meta = reportData.calcMetadata || {};
+                            let formula = "-";
+                            if (key === 'lostWages' && meta.monthlyIncome) {
+                              if (meta.isLostWagesManual && meta.lostWagesPeriods) {
+                                formula = meta.lostWagesPeriods.map(p => `(₩${formatComma(p.income)}/30)*${p.days}일*${p.multiplier}`).join(' + ');
+                              } else {
+                                formula = `(₩${formatComma(meta.monthlyIncome)} / 30일) * ${meta.lostWagesDays}일 * ${meta.lostWagesMultiplier}`;
+                              }
+                            } else if (key === 'lostEarnings' && meta.monthlyIncome) {
+                              if (meta.isLostEarningsManual && meta.lostEarningsPeriods) {
+                                formula = meta.lostEarningsPeriods.map(p => `(₩${formatComma(p.income)}*${p.rate}%*${p.hoffman})`).join(' + ');
+                              } else {
+                                formula = `(₩${formatComma(meta.monthlyIncome)} * ${meta.lossRate}% * ${meta.hoffman})`;
+                              }
+                            } else if (key === 'nursingExpenses' && meta.nursingDays) {
+                              const dailyRate = meta.nursingDailyWage > 0 ? meta.nursingDailyWage : Math.floor((Number(meta.monthlyIncome) || 0) / 25);
+                              formula = `₩${formatComma(dailyRate)} * ${meta.nursingDays}일`;
+                            } else if (key === 'transportationExpenses' && meta.transportationDays) {
+                              formula = `₩${formatComma(meta.transportationDailyRate)} * ${meta.transportationDays}일`;
+                            }
+
+                            return (
+                              <tr key={key}>
+                                <td className="border border-slate-300 p-2 font-bold">{label}</td>
+                                <td className="border border-slate-300 p-2 text-xs text-slate-600">{formula}</td>
+                                <td className="border border-slate-300 p-2 text-right font-mono">₩{formatComma(reportData.assessment[key] || 0)}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="bg-slate-100 font-bold">
+                            <td className="border border-slate-300 p-2" colSpan="2">합계</td>
+                            <td className="border border-slate-300 p-2 text-right font-mono">₩{calcs.subTotal.toLocaleString()}</td>
+                          </tr>
+                          {calcs.faultOffset > 0 && (
+                            <tr className="text-rose-600">
+                              <td className="border border-slate-300 p-2 font-bold">과실상계 ({reportData.liability.faultPercent}%)</td>
+                              <td className="border border-slate-300 p-2 text-sm">₩{formatComma(calcs.subTotal)} * {reportData.liability.faultPercent}%</td>
+                              <td className="border border-slate-300 p-2 text-right font-mono">- ₩{calcs.faultOffset.toLocaleString()}</td>
+                            </tr>
+                          )}
+                          {reportData.assessment.roundingDeduction > 0 && (
+                            <tr className="text-rose-600">
+                              <td className="border border-slate-300 p-2 font-bold">절사 금액</td>
+                              <td className="border border-slate-300 p-2 text-sm">-</td>
+                              <td className="border border-slate-300 p-2 text-right font-mono">- ₩{formatComma(reportData.assessment.roundingDeduction)}</td>
+                            </tr>
+                          )}
+                          <tr className="bg-slate-900 text-white font-black text-lg">
+                            <td className="p-3" colSpan="2">최종 손해사정금액</td>
+                            <td className="p-3 text-right font-mono">₩{calcs.finalPayment.toLocaleString()}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
                     <div className="mt-32 text-right">
                       <p className="text-lg mb-10 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.confirmation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.confirmation || "위와 같이 정당하게 손해사정 하였음을 확인합니다." }} />
                       <p className="text-2xl font-bold mb-2 outline-none" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('company.name', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.company.name }} />
