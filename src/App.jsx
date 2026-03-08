@@ -3,7 +3,7 @@ import {
   LayoutDashboard, FileText, CheckCircle2, Clock, Plus, Search, 
   Trash2, Edit2, X, Save, TrendingUp, Download, Loader2, 
   History, PlusCircle, ShieldCheck, LogOut, LogIn, UserPlus, Lock, Mail,
-  FileSearch, Printer, Copy, FileCheck, AlertCircle, Map as MapIcon, KeyRound,
+  FileSearch, Printer, Copy, FileCheck, AlertCircle, Map as MapIcon, KeyRound, Menu,
   ArrowLeft, PlusSquare, MinusCircle, FileEdit, CloudUpload, Calendar, ChevronLeft, MessageSquare, ArrowUp, ArrowDown, AlignLeft, AlignCenter, AlignJustify, Bold, Palette, Eraser,
   Paperclip, ExternalLink, Users,
   User, Shield, Calculator, Landmark, PenTool, Underline
@@ -231,6 +231,7 @@ const App = () => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login'); 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const previewSavedRange = useRef(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -251,12 +252,16 @@ const App = () => {
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [signUpData, setSignUpData] = useState({
     email: '', password: '', passwordConfirm: '',
-    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: ''
+    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: '', memberType: '손해사정사', isRepresentative: false
   });
 
   // 구글 로그인 후 최초 1회 추가 정보 입력 상태
   const [setupData, setSetupData] = useState({
-    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: ''
+    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: '', memberType: '손해사정사', isRepresentative: false
+  });
+
+  const [profileFormData, setProfileFormData] = useState({
+    name: '', phone: '', company: '', position: '', address: '', detailAddress: '', licenseNo: '', licenseType: '', memberType: '손해사정사', isRepresentative: false
   });
 
   const [isAddrOpen, setIsAddrOpen] = useState(false);
@@ -265,7 +270,7 @@ const App = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
   
-  const [pendingUsers, setPendingUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
 
   // 상담일지 상태
   const [consultations, setConsultations] = useState([]);
@@ -389,6 +394,14 @@ const App = () => {
     { title: '면책사항 검토', content: '사고 경위 조사 결과, 약관에서 정한 고의 또는 중과실 등 면책사유에 해당하지 않음을 확인하였음.' },
     { title: '보험금 지급의 결정', content: '사고 경위 및 손해 정도를 종합적으로 고려하여 다음과 같이 보험금을 산정함.' },
     { title: '손해배상금의 산정', content: '피해자의 소득, 장해율, 과실비율 등을 종합적으로 검토하여 약관상 지급기준에 따라 손해액을 산출함.' }
+  ]);
+
+  const [policyBasisLibrary, setPolicyBasisLibrary] = useState([
+    { title: '대인배상1', content: '「대인배상Ⅰ」에서 보험회사는 피보험자가 피보험자동차의 운행으로 인하여 다른 사람을 죽거나 다치게 하여 「자동차손해배상보장법」 제3조에 의한 손해배상책임을 짐으로써 입은 손해를 보상합니다.' },
+    { title: '대인배상2', content: '①  「대인배상Ⅱ」에서 보험회사는 피보험자가 피보험자동차를 소유ㆍ사용ㆍ관리하는 동안에 생긴 피보험자동차의 사고로 인하여 다른 사람을 죽게 하거나 다치게 하여 법률상 손해배상책임을 짐으로써 입은 손해 (「대인배상Ⅰ」에서 보상하는 손해를 초과하는 손해에 한함)를 보상합니다.' },
+    { title: '자기신체사고', content: '「자기신체사고」에서 보험회사는 피보험자가 피보험자동차를 소유ㆍ사용ㆍ관리하는 동안에 생긴 다음 중 어느 하나의 사고로 인하여 죽거나 상해(*1)를 입은 때 그로 인한 손해를 보상하여 드립니다.' },
+    { title: '무보험자동차상해', content: '「무보험자동차에 의한 상해」에서 보험회사는 피보험자가 무보험자동차로 인하여 생긴 사고로 죽거나 다친 때에 그로 인한 손해에 대하여 배상의무자(*1)가 있는 경우에 이 약관에서 정하는 바에 따라 보상하여 드립니다.' },
+    { title: '자동차상해특별약관', content: '①  보험회사(이하 “회사”라 합니다)는 피보험자가 피보험자동차를 소유, 사용, 관리하는 동안에 생긴 다음 중 어느 하나의 사고로 인하여 상해(*1)를 입은 때 그로 인한 손해를 보상하여 드립니다.\n1 .  피보험자동차의 운행으로 인한 사고(*2)\n2.  피보험자동차의 운행중 발생한 다음의 사고. 다만, 피보험자가 피보험자동차에 탑승중일 때에 한합니다.\n가. 날아오거나 떨어지는 물체와 충돌\n나. 화재 또는 폭발\n다. 피보험자동차의 낙하.' }
   ]);
 
   const handleSaveStandaloneCalc = async () => {
@@ -736,6 +749,8 @@ const App = () => {
         detailAddress: signUpData.detailAddress,
         licenseNo: signUpData.licenseNo,
         licenseType: signUpData.licenseType,
+        memberType: signUpData.memberType,
+        isRepresentative: signUpData.isRepresentative,
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
@@ -746,15 +761,46 @@ const App = () => {
     finally { setLoading(false); }
   };
 
+  const handleUpdateProfile = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    try {
+      setLoading(true);
+      const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
+      const dataToUpdate = cleanData(profileFormData);
+      await updateDoc(profileRef, dataToUpdate);
+      setProfile(prev => ({ ...prev, ...dataToUpdate }));
+      alert("정보가 성공적으로 수정되었습니다.");
+      setView('dashboard');
+    } catch (err) {
+      alert("수정 실패: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // --- 데이터 로드 ---
   useEffect(() => {
-    if (!user) return;
-    const userCasesCollection = collection(db, 'artifacts', appId, 'users', user.uid, 'cases');
-    const unsubscribe = onSnapshot(userCasesCollection, (snapshot) => {
-      setCases(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    if (!user || !profile) return;
+
+    let q;
+    if (profile.isRepresentative && profile.company) {
+      // 업체 대표인 경우 소속 회사의 모든 사건 조회 (appId로 격리)
+      q = query(collectionGroup(db, 'cases'), where('appId', '==', appId), where('company', '==', profile.company));
+    } else {
+      // 일반 사용자인 경우 본인 사건만 조회
+      q = collection(db, 'artifacts', appId, 'users', user.uid, 'cases');
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setCases(snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        _ref: doc.ref, // 업데이트/삭제를 위한 참조 저장
+        ...doc.data() 
+      })));
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, profile]);
 
   // --- 할 일 데이터 로드 ---
   useEffect(() => {
@@ -801,37 +847,47 @@ const App = () => {
     } catch (err) { console.error(err); }
   };
 
-  // --- 관리자 전용: 승인 대기자 조회 및 승인 핸들러 ---
-  const fetchPendingUsers = async () => {
+  // --- 관리자 전용: 사용자 조회 및 관리 핸들러 ---
+  const fetchAllUsers = async () => {
     try {
-      // 모든 사용자의 'profile' 서브컬렉션에서 승인되지 않은 문서 검색
-      // ※ 주의: Firebase 콘솔에서 'profile' 컬렉션 그룹에 대한 색인(Index) 생성이 필요할 수 있습니다.
-      const q = query(collectionGroup(db, 'profile'), where('approved', '==', false));
+      const q = query(collectionGroup(db, 'profile'));
       const querySnapshot = await getDocs(q);
       const users = querySnapshot.docs.map(doc => ({ 
         uid: doc.ref.parent.parent.id, 
         ...doc.data() 
       }));
-      setPendingUsers(users);
+      setAllUsers(users);
     } catch (err) {
-      console.error("대기자 명단 로드 실패:", err);
+      console.error("사용자 명단 로드 실패:", err);
     }
   };
 
-  const handleApproveUser = async (userId) => {
+  const handleToggleApproval = async (userId, currentStatus) => {
     try {
       const userRef = doc(db, 'artifacts', appId, 'users', userId, 'profile', 'info');
-      await updateDoc(userRef, { approved: true });
-      alert("사용자가 승인되었습니다.");
-      fetchPendingUsers(); // 목록 갱신
+      await updateDoc(userRef, { approved: !currentStatus });
+      alert(currentStatus ? "승인이 취소되었습니다." : "사용자가 승인되었습니다.");
+      fetchAllUsers();
     } catch (err) {
-      alert("승인 처리 중 오류가 발생했습니다: " + err.message);
+      alert("처리 중 오류가 발생했습니다: " + err.message);
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm("해당 사용자의 프로필 정보를 삭제하시겠습니까? (계정 자체가 삭제되지는 않습니다)")) return;
+    try {
+      const userRef = doc(db, 'artifacts', appId, 'users', userId, 'profile', 'info');
+      await deleteDoc(userRef);
+      alert("사용자 프로필이 삭제되었습니다.");
+      fetchAllUsers();
+    } catch (err) {
+      alert("삭제 실패: " + err.message);
     }
   };
 
   useEffect(() => {
     if (view === 'admin' && profile?.email === 'sopy1337@gmail.com') {
-      fetchPendingUsers();
+      fetchAllUsers();
     }
   }, [view, profile]);
 
@@ -870,6 +926,8 @@ const App = () => {
         detailAddress: setupData.detailAddress,
         licenseNo: setupData.licenseNo,
         licenseType: setupData.licenseType,
+        memberType: setupData.memberType,
+        isRepresentative: setupData.isRepresentative,
         approved: false, // 승인 대기 상태로 시작
         createdAt: new Date().toISOString()
       };
@@ -987,13 +1045,19 @@ const App = () => {
     }
 
     try {
-      if (editingCase?.id) {
+      if (editingCase?._ref || editingCase?.id) {
         const { reportContent: _, id: __, ...rawFields } = dataToSave;
         const updateFields = cleanData(rawFields);
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', editingCase.id), updateFields);
+        // 대표 권한 조회를 위해 업체명과 appId 포함
+        updateFields.company = profile?.company;
+        updateFields.appId = appId;
+        const targetRef = editingCase._ref || doc(db, 'artifacts', appId, 'users', user.uid, 'cases', editingCase.id);
+        await updateDoc(targetRef, updateFields);
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'cases'), cleanData({ 
           ...dataToSave, 
+          company: profile?.company,
+          appId: appId,
           createdAt: new Date().toISOString(),
           logs: formData.logs || [],
           diagnoses: formData.diagnoses || [],
@@ -1011,7 +1075,8 @@ const App = () => {
     setIsSavingReport(true);
     try {
       const cleanedReportData = cleanData(reportData);
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', selectedCaseForReport.id), { reportData: cleanedReportData });
+      const targetRef = selectedCaseForReport._ref || doc(db, 'artifacts', appId, 'users', user.uid, 'cases', selectedCaseForReport.id);
+      await updateDoc(targetRef, { reportData: cleanedReportData });
       setCases(prev => prev.map(c => c.id === selectedCaseForReport.id ? { ...c, reportData } : c));
     } catch (err) { console.error(err); }
     finally { setTimeout(() => setIsSavingReport(false), 500); }
@@ -1282,8 +1347,10 @@ const App = () => {
 
   const handleDelete = async (id) => {
     if (!user || !window.confirm("정말 삭제하시겠습니까?")) return;
+    const targetCase = cases.find(c => c.id === id);
+    if (!targetCase) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cases', id));
+      await deleteDoc(targetCase._ref || doc(db, 'artifacts', appId, 'users', user.uid, 'cases', id));
     } catch (err) { console.error(err); }
   };
 
@@ -1432,15 +1499,32 @@ const App = () => {
                 <input type="text" placeholder="업체명" value={signUpData.company} onChange={e=>setSignUpData({...signUpData, company: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <input type="text" placeholder="직책" value={signUpData.position} onChange={e=>setSignUpData({...signUpData, position: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               </div>
+              <div className="flex items-center gap-6 px-2 py-1">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                    <input type="radio" name="memberType" value="손해사정사" checked={signUpData.memberType === '손해사정사'} onChange={e => setSignUpData({...signUpData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                    손해사정사
+                  </label>
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                    <input type="radio" name="memberType" value="보조인" checked={signUpData.memberType === '보조인'} onChange={e => setSignUpData({...signUpData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                    보조인
+                  </label>
+                </div>
+                <div className="w-px h-4 bg-slate-200" />
+                <label className="flex items-center gap-2 text-sm font-bold text-indigo-600 cursor-pointer">
+                  <input type="checkbox" checked={signUpData.isRepresentative} onChange={e => setSignUpData({...signUpData, isRepresentative: e.target.checked})} className="w-4 h-4 accent-indigo-600" />
+                  업체 대표
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e=>setSignUpData({...signUpData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                <input type="text" placeholder="자격종류 (예: 신체, 재물 등)" value={signUpData.licenseType} onChange={e=>setSignUpData({...signUpData, licenseType: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+              </div>
               <div className="flex gap-2">
                 <input type="text" placeholder="사무소 주소" value={signUpData.address} readOnly required className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <button type="button" onClick={() => handleOpenAddr(addr => setSignUpData({...signUpData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2"><MapIcon size={14}/> 주소 검색</button>
               </div>
               <input type="text" placeholder="상세 주소" value={signUpData.detailAddress} onChange={e=>setSignUpData({...signUpData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-              <div className="grid grid-cols-2 gap-4">
-                <input type="text" placeholder="자격번호" value={signUpData.licenseNo} onChange={e=>setSignUpData({...signUpData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-                <input type="text" placeholder="자격종류 (예: 신체, 재물 등)" value={signUpData.licenseType} onChange={e=>setSignUpData({...signUpData, licenseType: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
-              </div>
               
               <div className="border-t pt-5 space-y-4">
                 <input type="email" placeholder="구글 계정 이메일" value={signUpData.email} readOnly required className="w-full px-5 py-3.5 border rounded-2xl text-sm font-bold outline-none bg-slate-100 text-slate-500" />
@@ -1468,26 +1552,34 @@ const App = () => {
                 <input type="text" placeholder="업체명" value={setupData.company} onChange={e => setSetupData({...setupData, company: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <input type="text" placeholder="직책" value={setupData.position} onChange={e => setSetupData({...setupData, position: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               </div>
-
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  placeholder="사무소 주소" 
-                  value={setupData.address} 
-                  readOnly 
-                  onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} 
-                  className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" 
-                />
-                <button type="button" onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
-                  <MapIcon size={14}/> 주소 검색
-                </button>
+              <div className="flex items-center gap-6 px-2 py-1">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                    <input type="radio" name="setupMemberType" value="손해사정사" checked={setupData.memberType === '손해사정사'} onChange={e => setSetupData({...setupData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                    손해사정사
+                  </label>
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                    <input type="radio" name="setupMemberType" value="보조인" checked={setupData.memberType === '보조인'} onChange={e => setSetupData({...setupData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                    보조인
+                  </label>
+                </div>
+                <div className="w-px h-4 bg-slate-200" />
+                <label className="flex items-center gap-2 text-sm font-bold text-indigo-600 cursor-pointer">
+                  <input type="checkbox" checked={setupData.isRepresentative} onChange={e => setSetupData({...setupData, isRepresentative: e.target.checked})} className="w-4 h-4 accent-indigo-600" />
+                  업체 대표
+                </label>
               </div>
-
-              <input type="text" placeholder="상세 주소" value={setupData.detailAddress} onChange={e => setSetupData({...setupData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               <div className="grid grid-cols-2 gap-4">
                 <input type="text" placeholder="자격번호" value={setupData.licenseNo} onChange={e => setSetupData({...setupData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
                 <input type="text" placeholder="자격종류 (예: 신체, 재물 등)" value={setupData.licenseType} onChange={e => setSetupData({...setupData, licenseType: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               </div>
+              <div className="flex gap-2">
+                <input type="text" placeholder="사무소 주소" value={setupData.address} readOnly onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" />
+                <button type="button" onClick={() => handleOpenAddr(addr => setSetupData({...setupData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
+                  <MapIcon size={14}/> 주소 검색
+                </button>
+              </div>
+              <input type="text" placeholder="상세 주소" value={setupData.detailAddress} onChange={e => setSetupData({...setupData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
               
               {errorMsg && <p className="text-red-500 text-xs font-black px-2">{errorMsg}</p>}
               
@@ -1522,11 +1614,20 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-900 overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 print:hidden transition-all duration-500">
-        <div className="p-8 flex-1 overflow-y-auto custom-scrollbar">
+      {/* 모바일용 오버레이 */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-white flex flex-col shrink-0 transform transition-transform duration-300 lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} print:hidden`}>
+        <div className="p-8 flex-1 overflow-y-auto custom-scrollbar relative">
+          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden absolute top-8 right-4 text-slate-400"><X size={24}/></button>
           <div className="flex items-center gap-3 mb-12"><div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg"><ShieldCheck size={24}/></div><div><span className="text-xl font-black block tracking-tighter italic">E-UM NEXUS</span><span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Master Edition</span></div></div>
           <nav className="space-y-3">
             <button onClick={()=>setView('dashboard')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='dashboard'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><LayoutDashboard size={20}/> 대시보드</button>
+            <button onClick={()=>{ if(profile) setProfileFormData({...profile}); setView('profile'); }} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='profile'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><User size={20}/> 내 정보 수정</button>
             <button onClick={()=>setView('list')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='list'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileText size={20}/> 사건 관리대장</button>
             <button onClick={()=>setView('consultation')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='consultation'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><MessageSquare size={20}/> 고객 상담일지</button>
             <button onClick={handleNewReport} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='report'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}><FileEdit size={20}/> 손해사정서 작성</button>
@@ -1535,7 +1636,7 @@ const App = () => {
             
             {profile?.email === 'sopy1337@gmail.com' && (
               <button onClick={()=>setView('admin')} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold text-sm ${view==='admin'?'bg-indigo-600 shadow-xl text-white':'text-slate-400 hover:bg-slate-800'}`}>
-                <Shield size={20}/> 관리자 승인
+                <Shield size={20}/> 관리자 승인 및 관리
               </button>
             )}
 
@@ -1564,11 +1665,11 @@ const App = () => {
           <div className="flex items-center gap-6">
             {view === 'report' && <button onClick={()=>setView('list')} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><ChevronLeft size={24}/></button>}
             <h2 className="text-2xl font-black text-slate-800 tracking-tight italic uppercase underline decoration-indigo-500 decoration-4 underline-offset-8 tracking-tighter">
-              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : view === 'consultation' ? '고객 상담일지' : view === 'community' ? '실무지식교류방' : view === 'admin' ? '신규 가입자 승인' : view === 'calculator' ? '손해배상금 산출' : '현황판'}
+              {view === 'report' ? '손해사정서 작성' : view === 'list' ? '사건 통합 대장' : view === 'consultation' ? '고객 상담일지' : view === 'community' ? '실무지식교류방' : view === 'admin' ? '사용자 승인 및 관리' : view === 'calculator' ? '손해배상금 산출' : view === 'profile' ? '내 정보 수정' : '현황판'}
             </h2>
           </div>
           <div className="flex gap-4">
-            {(view === 'report' || view === 'calculator') ? (
+            {(view === 'report' || view === 'calculator' || view === 'profile') ? (
               <>
                 {view === 'report' && <div className="flex bg-slate-100 p-1 rounded-lg mr-4 print:hidden">
                   <button onClick={() => setReportTab('input')} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition ${reportTab === 'input' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>데이터 입력</button>
@@ -1604,7 +1705,7 @@ const App = () => {
                       className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-xl group cursor-pointer"
                     >
                       <div className={`p-4 bg-${s.color}-50 text-${s.color}-600 rounded-2xl w-fit mb-6 group-hover:scale-110 transition-transform`}><IconComp size={24}/></div>
-                      <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">{s.label}</p>
+                      <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">{s.label}</p>
                       <h3 className="text-4xl font-black text-slate-800 tracking-tighter">{s.val}<span className="text-sm ml-1 text-slate-300 font-bold">건</span></h3>
                     </div>
                   );
@@ -1697,14 +1798,14 @@ const App = () => {
                 </div>
               </div>
 
-              <div className="bg-slate-900 rounded-[3rem] p-16 text-white flex justify-between items-center shadow-2xl relative overflow-hidden group">
+              <div className="bg-slate-900 rounded-[3rem] p-8 md:p-16 text-white flex flex-col md:flex-row justify-between items-center gap-8 shadow-2xl relative overflow-hidden group">
                 <div className="relative z-10">
                   <h4 className="text-indigo-400 text-xs font-black uppercase mb-6 tracking-[0.3em] animate-pulse italic">지급 예상 수수료</h4>
-                  <p className="text-6xl font-black leading-none tracking-tighter italic">예상 수수료 합계<br/><span className="text-indigo-400 font-mono mt-4 block not-italic">₩{(stats.totalAmount).toLocaleString()}</span></p>
+                  <p className="text-4xl md:text-6xl font-black leading-none tracking-tighter italic">예상 수수료 합계<br/><span className="text-indigo-400 font-mono mt-4 block not-italic">₩{(stats.totalAmount).toLocaleString()}</span></p>
                 </div>
-                <div className="relative z-10 text-right space-y-4">
+                <div className="relative z-10 text-center md:text-right space-y-4 w-full md:w-auto">
                   <div className="p-6 bg-white/5 rounded-[2rem] backdrop-blur-md border border-white/10 text-left">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Expert License</p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 truncate">Expert License</p>
                     <p className="text-xl font-black italic text-indigo-300">NO. {profile?.licenseNo || '기록 없음'}</p>
                   </div>
                   <button onClick={()=>setView('list')} className="px-10 py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-xl transition-all hover:scale-105">전체 사건 조회</button>
@@ -1717,8 +1818,8 @@ const App = () => {
           {view === 'admin' && (
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in fade-in duration-500">
               <div className="p-8 bg-slate-50/30 border-b flex justify-between items-center">
-                <h3 className="text-lg font-black text-slate-800">승인 대기 중인 사용자 ({pendingUsers.length})</h3>
-                <button onClick={fetchPendingUsers} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-black hover:bg-indigo-100 transition-all">새로고침</button>
+                <h3 className="text-lg font-black text-slate-800">전체 사용자 관리 ({allUsers.length})</h3>
+                <button onClick={fetchAllUsers} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-black hover:bg-indigo-100 transition-all">새로고침</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -1727,11 +1828,12 @@ const App = () => {
                       <th className="px-10 py-6">성명 / 이메일</th>
                       <th className="px-8 py-6">업체 / 직책</th>
                       <th className="px-6 py-6">연락처 / 자격번호</th>
+                      <th className="px-6 py-6 text-center">상태</th>
                       <th className="px-10 py-6 text-right">작업</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {pendingUsers.length > 0 ? pendingUsers.map(u => (
+                    {allUsers.length > 0 ? allUsers.map(u => (
                       <tr key={u.uid} className="hover:bg-indigo-50/10 transition-all">
                         <td className="px-10 py-8">
                           <p className="font-black text-sm text-slate-800">{u.name}</p>
@@ -1745,12 +1847,22 @@ const App = () => {
                           <p className="text-sm font-bold text-slate-700">{u.phone}</p>
                           <p className="text-[10px] text-slate-400 font-bold">No. {u.licenseNo}</p>
                         </td>
+                        <td className="px-6 py-8 text-center">
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-black ${u.approved ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-amber-50 text-amber-600 border border-amber-100'}`}>
+                            {u.approved ? '승인됨' : '대기중'}
+                          </span>
+                        </td>
                         <td className="px-10 py-8 text-right">
-                          <button onClick={() => handleApproveUser(u.uid)} className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg hover:bg-indigo-700 transition-all">승인하기</button>
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => handleToggleApproval(u.uid, u.approved)} className={`px-4 py-2 rounded-xl text-[10px] font-black shadow-sm transition-all ${u.approved ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                              {u.approved ? '승인취소' : '승인하기'}
+                            </button>
+                            <button onClick={() => handleDeleteUser(u.uid)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                          </div>
                         </td>
                       </tr>
                     )) : (
-                      <tr><td colSpan="4" className="px-10 py-20 text-center text-slate-300 font-bold uppercase tracking-widest">승인 대기 중인 사용자가 없습니다.</td></tr>
+                      <tr><td colSpan="5" className="px-10 py-20 text-center text-slate-300 font-bold uppercase tracking-widest">등록된 사용자가 없습니다.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -1896,6 +2008,85 @@ const App = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* PROFILE EDIT VIEW */}
+          {view === 'profile' && (
+            <div className="max-w-2xl mx-auto bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center gap-4 mb-10">
+                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl"><User size={28}/></div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight">내 정보 수정</h3>
+                  <p className="text-sm font-bold text-slate-400">회원가입 시 입력한 정보를 수정할 수 있습니다.</p>
+                </div>
+              </div>
+              
+              <form onSubmit={handleUpdateProfile} className="space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <InputGroup label="성명">
+                    <input type="text" value={profileFormData.name} onChange={e => setProfileFormData({...profileFormData, name: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                  <InputGroup label="연락처">
+                    <input type="text" value={profileFormData.phone} onChange={e => setProfileFormData({...profileFormData, phone: formatPhone(e.target.value)})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <InputGroup label="업체명">
+                    <input type="text" value={profileFormData.company} onChange={e => setProfileFormData({...profileFormData, company: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                  <InputGroup label="직책">
+                    <input type="text" value={profileFormData.position} onChange={e => setProfileFormData({...profileFormData, position: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                </div>
+
+                <div className="flex items-center gap-6 px-2 py-1">
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                      <input type="radio" name="editMemberType" value="손해사정사" checked={profileFormData.memberType === '손해사정사'} onChange={e => setProfileFormData({...profileFormData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                      손해사정사
+                    </label>
+                    <label className="flex items-center gap-2 text-sm font-bold text-slate-600 cursor-pointer">
+                      <input type="radio" name="editMemberType" value="보조인" checked={profileFormData.memberType === '보조인'} onChange={e => setProfileFormData({...profileFormData, memberType: e.target.value})} className="w-4 h-4 accent-indigo-600" />
+                      보조인
+                    </label>
+                  </div>
+                  <div className="w-px h-4 bg-slate-200" />
+                  <label className="flex items-center gap-2 text-sm font-bold text-indigo-600 cursor-pointer">
+                    <input type="checkbox" checked={profileFormData.isRepresentative} onChange={e => setProfileFormData({...profileFormData, isRepresentative: e.target.checked})} className="w-4 h-4 accent-indigo-600" />
+                    업체 대표
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <InputGroup label="자격번호">
+                    <input type="text" value={profileFormData.licenseNo} onChange={e => setProfileFormData({...profileFormData, licenseNo: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                  <InputGroup label="자격종류">
+                    <input type="text" value={profileFormData.licenseType} onChange={e => setProfileFormData({...profileFormData, licenseType: e.target.value})} required className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                  </InputGroup>
+                </div>
+
+                <InputGroup label="사무소 주소">
+                  <div className="flex gap-2">
+                    <input type="text" value={profileFormData.address} readOnly onClick={() => handleOpenAddr(addr => setProfileFormData({...profileFormData, address: addr}))} className="flex-1 px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none cursor-pointer" />
+                    <button type="button" onClick={() => handleOpenAddr(addr => setProfileFormData({...profileFormData, address: addr}))} className="px-6 bg-slate-800 text-white rounded-2xl text-[10px] font-black uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
+                      <MapIcon size={14}/> 주소 검색
+                    </button>
+                  </div>
+                </InputGroup>
+
+                <InputGroup label="상세 주소">
+                  <input type="text" value={profileFormData.detailAddress} onChange={e => setProfileFormData({...profileFormData, detailAddress: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border rounded-2xl text-sm font-bold outline-none" />
+                </InputGroup>
+
+                <div className="pt-5">
+                  <button type="submit" disabled={loading} className="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black text-sm shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+                    {loading ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
+                    정보 수정 완료
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 
@@ -2056,46 +2247,79 @@ const App = () => {
                       </FormSection>
                     )}
 
-                    <FormSection title="손해액 산정" icon={Calculator}>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {Object.entries(assessmentLabels).map(([key, label]) => (
-                          <div key={key} className="space-y-1">
-                            <div className="flex justify-between items-center px-1">
-                              <label className="text-xs font-bold text-slate-500">{label}</label>
-                              <button type="button" onClick={() => setActiveCalcField(key)} className="text-[10px] text-blue-600 font-bold hover:underline">상세 산출</button>
+                    {!(reportData.reportType === 'longTermDisease' || reportData.reportType === 'longTermInjury' || reportData.reportType === 'medical') && (
+                      <FormSection title="손해액 산정" icon={Calculator}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {Object.entries(assessmentLabels).map(([key, label]) => (
+                            <div key={key} className="space-y-1">
+                              <div className="flex justify-between items-center px-1">
+                                <label className="text-xs font-bold text-slate-500">{label}</label>
+                                <button type="button" onClick={() => setActiveCalcField(key)} className="text-[10px] text-blue-600 font-bold hover:underline">상세 산출</button>
+                              </div>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
+                                <input 
+                                  type="text" 
+                                  className="w-full pl-8 pr-3 py-2 border rounded-md font-mono text-sm text-right"
+                                  value={formatComma(reportData.assessment[key] || 0)}
+                                  onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
+                                />
+                              </div>
                             </div>
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₩</span>
-                              <input 
-                                type="text" 
-                                className="w-full pl-8 pr-3 py-2 border rounded-md font-mono text-sm text-right"
-                                value={formatComma(reportData.assessment[key] || 0)}
-                                onChange={e => updateReportField(`assessment.${key}`, unformatComma(e.target.value))}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-8 p-4 bg-slate-900 rounded-xl text-white flex justify-between items-center">
-                        <span className="font-bold">최종 산정액 합계</span>
-                        <span className="text-xl font-black italic">₩{calcs.finalPayment.toLocaleString()}</span>
-                      </div>
-                    </FormSection>
+                          ))}
+                        </div>
+                        <div className="mt-8 p-4 bg-slate-900 rounded-xl text-white flex justify-between items-center">
+                          <span className="font-bold">최종 산정액 합계</span>
+                          <span className="text-xl font-black italic">₩{calcs.finalPayment.toLocaleString()}</span>
+                        </div>
+                      </FormSection>
+                    )}
 
                     <FormSection title={reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임 검토" : "손해배상책임 등 검토"} icon={Shield}>
                       <div className="space-y-4">
                         <InputGroup label={reportData.reportType?.startsWith('longTerm') || reportData.reportType === 'medical' ? "보험사의 보험금 지급책임 면/부책" : "피보험자 손해배상책임 면/부책"}><input type="text" value={reportData.liability.liabilityStatus} onChange={e => updateReportField('liability.liabilityStatus', e.target.value)} className="w-full border p-2 rounded-md" /></InputGroup>
                         <div className="space-y-2">
                           <h5 className="text-[13pt] font-bold text-slate-700 mb-2 border-b pb-1">약관상 보험자 지급책임 근거</h5>
+                            
+                            {/* 자동차보험일 때만 문구 라이브러리 선택 표시 */}
+                            {reportData.reportType === 'auto' && (
+                              <div className="flex gap-2 mb-2">
+                                <select 
+                                  className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold outline-none"
+                                  onChange={(e) => {
+                                    const template = policyBasisLibrary[e.target.value];
+                                    if (template) setNewPolicyBasis(template);
+                                  }}
+                                  value=""
+                                >
+                                  <option value="">자주 쓰는 문구 라이브러리 선택...</option>
+                                  {policyBasisLibrary.map((t, idx) => (
+                                    <option key={idx} value={idx}>{t.title}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
                           <div className="grid grid-cols-1 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
                             <input type="text" placeholder="제목 (예: 보상하는 손해)" className="w-full border p-2 rounded-md text-sm" value={newPolicyBasis.title} onChange={e => setNewPolicyBasis({...newPolicyBasis, title: e.target.value})} />
                             <textarea rows={2} className="w-full border p-2 rounded-md text-sm" placeholder="내용 입력..." value={newPolicyBasis.content} onChange={e => setNewPolicyBasis({...newPolicyBasis, content: e.target.value})} />
-                            <button type="button" onClick={() => {
-                              if (newPolicyBasis.title.trim() && newPolicyBasis.content.trim()) {
-                                updateReportField('liability.policyLiabilityBasis', [...(reportData.liability.policyLiabilityBasis || []), { ...newPolicyBasis }]);
-                                setNewPolicyBasis({ title: '', content: '' });
-                              }
-                            }} className="w-full py-2 bg-slate-800 text-white rounded-md text-xs font-bold hover:bg-black">추가</button>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={() => {
+                                  if (newPolicyBasis.title.trim() && newPolicyBasis.content.trim()) {
+                                    updateReportField('liability.policyLiabilityBasis', [...(reportData.liability.policyLiabilityBasis || []), { ...newPolicyBasis }]);
+                                    setNewPolicyBasis({ title: '', content: '' });
+                                  }
+                                }} className="flex-1 px-4 py-2 bg-slate-800 text-white rounded-md text-xs font-bold hover:bg-black">항목 추가</button>
+                                {reportData.reportType === 'auto' && (
+                                  <button type="button" onClick={() => {
+                                    if (newPolicyBasis.title.trim() && newPolicyBasis.content.trim()) {
+                                      setPolicyBasisLibrary(prev => [...prev, { ...newPolicyBasis }]);
+                                      alert("현재 문구가 라이브러리에 저장되었습니다.");
+                                    }
+                                  }} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-md text-xs font-bold hover:bg-indigo-100">라이브러리 저장</button>
+                                )}
+                                <button type="button" onClick={() => setNewPolicyBasis({ title: '', content: '' })} className="px-4 py-2 bg-slate-100 text-slate-500 rounded-md text-xs font-bold hover:bg-slate-200">초기화</button>
+                              </div>
                           </div>
                           <div className="space-y-1 mt-2">
                             {(reportData.liability.policyLiabilityBasis || []).map((item, idx) => (
@@ -2667,72 +2891,76 @@ const App = () => {
                       </div>
                     </div>
 
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.sectionAssessment', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.sectionAssessment || "6. 손해액 산정 내역" }} />
-                    <div className="border-t-2 border-slate-900">
-                      <table className="w-full border-collapse text-sm">
-                        <thead>
-                          <tr className="bg-slate-50">
-                            <th className="border border-slate-300 p-2 text-left w-1/4">항목</th>
-                            <th className="border border-slate-300 p-2 text-left">산식 및 근거</th>
-                            <th className="border border-slate-300 p-2 text-right">산정금액</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.entries(assessmentLabels).map(([key, label]) => {
-                            const meta = reportData.calcMetadata || {};
-                            let formula = "-";
-                            if (key === 'lostWages' && meta.monthlyIncome) {
-                              if (meta.isLostWagesManual && meta.lostWagesPeriods) {
-                                formula = meta.lostWagesPeriods.map(p => `(₩${formatComma(p.income)}/30)*${p.days}일*${p.multiplier}`).join(' + ');
-                              } else {
-                                formula = `(₩${formatComma(meta.monthlyIncome)} / 30일) * ${meta.lostWagesDays}일 * ${meta.lostWagesMultiplier}`;
-                              }
-                            } else if (key === 'lostEarnings' && meta.monthlyIncome) {
-                              if (meta.isLostEarningsManual && meta.lostEarningsPeriods) {
-                                formula = meta.lostEarningsPeriods.map(p => `(₩${formatComma(p.income)}*${p.rate}%*${p.hoffman})`).join(' + ');
-                              } else {
-                                formula = `(₩${formatComma(meta.monthlyIncome)} * ${meta.lossRate}% * ${meta.hoffman})`;
-                              }
-                            } else if (key === 'nursingExpenses' && meta.nursingDays) {
-                              const dailyRate = meta.nursingDailyWage > 0 ? meta.nursingDailyWage : Math.floor((Number(meta.monthlyIncome) || 0) / 25);
-                              formula = `₩${formatComma(dailyRate)} * ${meta.nursingDays}일`;
-                            } else if (key === 'transportationExpenses' && meta.transportationDays) {
-                              formula = `₩${formatComma(meta.transportationDailyRate)} * ${meta.transportationDays}일`;
-                            }
-
-                            return (
-                              <tr key={key}>
-                                <td className="border border-slate-300 p-2 font-bold">{label}</td>
-                                <td className="border border-slate-300 p-2 text-xs text-slate-600">{formula}</td>
-                                <td className="border border-slate-300 p-2 text-right font-mono">₩{formatComma(reportData.assessment[key] || 0)}</td>
+                    {!(reportData.reportType === 'longTermDisease' || reportData.reportType === 'longTermInjury' || reportData.reportType === 'medical') && (
+                      <>
+                        <h2 className="text-xl font-bold mb-6 border-l-4 border-slate-900 pl-3 mt-16 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.sectionAssessment', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.sectionAssessment || "6. 손해액 산정 내역" }} />
+                        <div className="border-t-2 border-slate-900">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="bg-slate-50">
+                                <th className="border border-slate-300 p-2 text-left w-1/4">항목</th>
+                                <th className="border border-slate-300 p-2 text-left">산식 및 근거</th>
+                                <th className="border border-slate-300 p-2 text-right">산정금액</th>
                               </tr>
-                            );
-                          })}
-                          <tr className="bg-slate-100 font-bold">
-                            <td className="border border-slate-300 p-2" colSpan="2">합계</td>
-                            <td className="border border-slate-300 p-2 text-right font-mono">₩{calcs.subTotal.toLocaleString()}</td>
-                          </tr>
-                          {calcs.faultOffset > 0 && (
-                            <tr className="text-rose-600">
-                              <td className="border border-slate-300 p-2 font-bold">과실상계 ({reportData.liability.faultPercent}%)</td>
-                              <td className="border border-slate-300 p-2 text-sm">₩{formatComma(calcs.subTotal)} * {reportData.liability.faultPercent}%</td>
-                              <td className="border border-slate-300 p-2 text-right font-mono">- ₩{calcs.faultOffset.toLocaleString()}</td>
-                            </tr>
-                          )}
-                          {reportData.assessment.roundingDeduction > 0 && (
-                            <tr className="text-rose-600">
-                              <td className="border border-slate-300 p-2 font-bold">절사 금액</td>
-                              <td className="border border-slate-300 p-2 text-sm">-</td>
-                              <td className="border border-slate-300 p-2 text-right font-mono">- ₩{formatComma(reportData.assessment.roundingDeduction)}</td>
-                            </tr>
-                          )}
-                          <tr className="bg-slate-900 text-white font-black text-lg">
-                            <td className="p-3" colSpan="2">최종 손해사정금액</td>
-                            <td className="p-3 text-right font-mono">₩{calcs.finalPayment.toLocaleString()}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
+                            </thead>
+                            <tbody>
+                              {Object.entries(assessmentLabels).map(([key, label]) => {
+                                const meta = reportData.calcMetadata || {};
+                                let formula = "-";
+                                if (key === 'lostWages' && meta.monthlyIncome) {
+                                  if (meta.isLostWagesManual && meta.lostWagesPeriods) {
+                                    formula = meta.lostWagesPeriods.map(p => `(₩${formatComma(p.income)}/30)*${p.days}일*${p.multiplier}`).join(' + ');
+                                  } else {
+                                    formula = `(₩${formatComma(meta.monthlyIncome)} / 30일) * ${meta.lostWagesDays}일 * ${meta.lostWagesMultiplier}`;
+                                  }
+                                } else if (key === 'lostEarnings' && meta.monthlyIncome) {
+                                  if (meta.isLostEarningsManual && meta.lostEarningsPeriods) {
+                                    formula = meta.lostEarningsPeriods.map(p => `(₩${formatComma(p.income)}*${p.rate}%*${p.hoffman})`).join(' + ');
+                                  } else {
+                                    formula = `(₩${formatComma(meta.monthlyIncome)} * ${meta.lossRate}% * ${meta.hoffman})`;
+                                  }
+                                } else if (key === 'nursingExpenses' && meta.nursingDays) {
+                                  const dailyRate = meta.nursingDailyWage > 0 ? meta.nursingDailyWage : Math.floor((Number(meta.monthlyIncome) || 0) / 25);
+                                  formula = `₩${formatComma(dailyRate)} * ${meta.nursingDays}일`;
+                                } else if (key === 'transportationExpenses' && meta.transportationDays) {
+                                  formula = `₩${formatComma(meta.transportationDailyRate)} * ${meta.transportationDays}일`;
+                                }
+
+                                return (
+                                  <tr key={key}>
+                                    <td className="border border-slate-300 p-2 font-bold">{label}</td>
+                                    <td className="border border-slate-300 p-2 text-xs text-slate-600">{formula}</td>
+                                    <td className="border border-slate-300 p-2 text-right font-mono">₩{formatComma(reportData.assessment[key] || 0)}</td>
+                                  </tr>
+                                );
+                              })}
+                              <tr className="bg-slate-100 font-bold">
+                                <td className="border border-slate-300 p-2" colSpan="2">합계</td>
+                                <td className="border border-slate-300 p-2 text-right font-mono">₩{calcs.subTotal.toLocaleString()}</td>
+                              </tr>
+                              {calcs.faultOffset > 0 && (
+                                <tr className="text-rose-600">
+                                  <td className="border border-slate-300 p-2 font-bold">과실상계 ({reportData.liability.faultPercent}%)</td>
+                                  <td className="border border-slate-300 p-2 text-sm">₩{formatComma(calcs.subTotal)} * {reportData.liability.faultPercent}%</td>
+                                  <td className="border border-slate-300 p-2 text-right font-mono">- ₩{calcs.faultOffset.toLocaleString()}</td>
+                                </tr>
+                              )}
+                              {reportData.assessment.roundingDeduction > 0 && (
+                                <tr className="text-rose-600">
+                                  <td className="border border-slate-300 p-2 font-bold">절사 금액</td>
+                                  <td className="border border-slate-300 p-2 text-sm">-</td>
+                                  <td className="border border-slate-300 p-2 text-right font-mono">- ₩{formatComma(reportData.assessment.roundingDeduction)}</td>
+                                </tr>
+                              )}
+                              <tr className="bg-slate-900 text-white font-black text-lg">
+                                <td className="p-3" colSpan="2">최종 손해사정금액</td>
+                                <td className="p-3 text-right font-mono">₩{calcs.finalPayment.toLocaleString()}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
 
                     <div className="mt-32 text-right">
                       <p className="text-lg mb-10 outline-none focus:bg-blue-50" contentEditable suppressContentEditableWarning onBlur={e => updateReportField('labels.confirmation', e.target.innerHTML)} dangerouslySetInnerHTML={{ __html: reportData.labels?.confirmation || "위와 같이 정당하게 손해사정 하였음을 확인합니다." }} />
